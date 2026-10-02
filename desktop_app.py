@@ -195,6 +195,16 @@ def load_cached_html() -> str:
 
 
 def main():
+    just_set_up = False
+    if "--setup" in sys.argv or not CREDS_FILE.exists():
+        import setup_ui  # noqa: PLC0415
+
+        had_file = CREDS_FILE.exists()
+        saved = setup_ui.run_setup(CREDS_FILE)
+        if not saved and not had_file:
+            return  # cancelled on first run: nothing to show
+        just_set_up = saved
+
     window = webview.create_window(
         "Smartschool Planner",
         html=load_cached_html(),  # opens straight on the app; never syncs by itself
@@ -210,6 +220,8 @@ def main():
     window.events.shown += api._tune_window
     window.events.maximized += api._on_maximized
     window.events.restored += api._on_restored
+    if just_set_up:
+        window.events.shown += api.sync_now  # first sync right after saving credentials
     webview.start()
 
 
