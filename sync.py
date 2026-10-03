@@ -1,6 +1,5 @@
-"""
-scrapes all the data then writes it to the json file
-"""
+"""Pulls lessons, tasks and grades into data/planner_data.json.
+Run: python sync.py [--days-back N --days-ahead N]"""
 
 from __future__ import annotations
 
@@ -26,16 +25,12 @@ from dutch_dates import resolve_due_date
 import gemini_dates
 import planner_details
 
-# ---------------------------------------------------------------------------
-# when set to true it uses the built in dutch_dates.py to set the deadlines and sends unchanged files to gemini. 
-# when offline this is the only option
-# ---------------------------------------------------------------------------
+# Free regex deadline parser (dutch_dates.py): off, the AI pass replaces it. True = run it first.
 USE_REGEX_DEADLINE_PARSER = False
 
 
 def get_root() -> Path:
-    """Folder this program's files live in - the exe's own folder when
-    packaged with PyInstaller, otherwise this script's folder."""
+    """Program folder (the exe's folder when packaged)."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).parent
@@ -45,8 +40,7 @@ ROOT = get_root()
 DATA_DIR = ROOT / "data"
 OUTPUT_FILE = DATA_DIR / "planner_data.json"
 
-# Status-flag values Smartschool uses for "nothing here" on a lesson.
-# Anything else is treated as "there might be info worth fetching".
+# status flags meaning "nothing here"; anything else may have info
 EMPTY_ISH = {"", "0", "false", "no", "none", None}
 
 
@@ -57,7 +51,7 @@ def looks_truthy(value) -> bool:
 
 
 def fmt_person(name_obj) -> str:
-    """PersonDescription -> a plain display name."""
+    """PersonDescription -> display name."""
     if name_obj is None:
         return ""
     return getattr(name_obj, "starting_with_first_name", None) or getattr(name_obj, "starting_with_last_name", "") or ""
@@ -76,8 +70,7 @@ def build_hours_lookup(session: Smartschool) -> dict:
 
 
 def parse_structured_deadline(raw: str | None) -> date | None:
-    """Smartschool sometimes gives a real deadline field already (format unconfirmed
-    for your school - could be empty, ISO, or DD/MM/YYYY). Try the sane options."""
+    """Structured deadline field (format unconfirmed: empty, ISO or DD/MM/YYYY)."""
     if not raw or not str(raw).strip():
         return None
     raw = str(raw).strip()
@@ -98,20 +91,8 @@ def parse_structured_deadline(raw: str | None) -> date | None:
 
 
 def resolve_due_date_sync(explicit_deadline: str | None, free_text: str, reference_date: date) -> tuple[str, bool, str, bool]:
-    """
-    The no-network part of figuring out a task's real due date. Smartschool
-    tasks are often posted on one lesson day but actually due a different day
-    mentioned only in the description text (e.g. "tegen donderdag").
-
-    Priority: 1) an explicit structured deadline field, if Smartschool gives
-    one and it parses cleanly (always on - this is a real field, not a guess),
-    2) the free-text keyword parser in dutch_dates.py, ONLY if
-    USE_REGEX_DEADLINE_PARSER is True.
-
-    Returns (due_date_iso, was_corrected, source, needs_ai) - needs_ai=True
-    means nothing was resolved here and this item should be sent to the AI
-    batch pass (see gemini_dates.py), using the same free_text/reference_date.
-    """
+    """Resolve a due date without network: structured deadline, then the regex parser if enabled.
+    Returns (due_date_iso, was_corrected, source, needs_ai)."""
     structured = parse_structured_deadline(explicit_deadline)
     if structured:
         return structured.isoformat(), structured != reference_date, "structured", False
@@ -125,37 +106,19 @@ def resolve_due_date_sync(explicit_deadline: str | None, free_text: str, referen
 
 
 def _register_for_ai(pending: list[dict], free_text: str, reference_date: date, entries: list[dict]) -> None:
-    """Queues one or more dicts to be patched together once the AI batch pass
-    resolves this item (entries are separate dict objects - e.g. a "task"
-    display record and its matching "todo" record - that all need the same
-    resulting due date written into them)."""
+    """Queue dicts to patch together once the AI pass resolves this item."""
     if free_text and free_text.strip():
         pending.append({"text": free_text, "posted": reference_date, "entries": entries})
 
 
 def stable_task_id(course: str, type_: str, description: str, due_date: str) -> str:
-    """
-    A stable id for a task that survives re-syncs (so "done" checkmarks persist
-    even though we refetch and rebuild the whole todo list every run). Based on
-    content, not on any Smartschool-assigned id, since not every source
-    (future_tasks vs lesson-level assignments) reliably exposes the same kind
-    of id. IMPORTANT: only call this once a task's due_date is FINAL (i.e.
-    after the AI batch pass), or the id computed here won't match the one
-    computed for the same task elsewhere once its due date changes.
-    """
+    """Content-hash id that survives re-syncs. Call only once due_date is final (after the AI pass)."""
     raw = f"{course}|{type_}|{description}|{due_date}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _flatten_raw(obj, prefix: str = "") -> list[tuple[str, str]]:
-    """
-    Turns a nested JSON structure into a flat list of (path, value) pairs for
-    every non-empty string/number leaf. Used for two things: (1) scanning for
-    a deadline phrase anywhere in the data Smartschool actually sent back,
-    not just under a handful of guessed field names, and (2) showing "every
-    field Smartschool gave us" in the app's detail view, since the model this
-    library exposes doesn't cover everything the raw API response contains.
-    """
+    """Flatten nested JSON into (path, value) pairs of non-empty string/number leaves."""
     out: list[tuple[str, str]] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -172,11 +135,7 @@ def _flatten_raw(obj, prefix: str = "") -> list[tuple[str, str]]:
     return out
 
 
-# Leaf field names that are pure backend plumbing, not anything a person
-# looking at the Smartschool page would consider "information" - filtered out
-# of the detail view so it isn't buried in noise, but NOT filtered out of the
-# date-scanning text (harmless there, and erring toward finding the deadline
-# matters more than a perfectly tidy scan).
+# backend-plumbing field names: hidden from the detail view, still date-scanned
 _TECHNICAL_LEAF_NAMES = {
     "id", "platformid", "sort", "color", "resolvedstatus", "unconfirmed",
     "pinned", "isparticipant", "onlinesession", "plannedelementtype",
@@ -194,8 +153,7 @@ def fetch_moment_info(
 ) -> dict | None:
     try:
         info = SmartschoolMomentInfos(session, moment_id)
-        # SmartschoolMomentInfos is iterable (yields one "class" element per xpath match);
-        # take the first (there's only ever one for a given moment_id).
+        # yields one element per xpath match; take the first
         for item in info:
             assignments = []
             for a in item.assignments:
@@ -214,7 +172,7 @@ def fetch_moment_info(
                     if val
                 ]
                 assignment = {
-                    "id": None,  # filled in once due_date is final - see run()
+                    "id": None,  # set in run()
                     "type": a.type,
                     "description": a.description,
                     "info": a.assignment_info,
@@ -233,7 +191,7 @@ def fetch_moment_info(
                 "materials": item.materials,
                 "assignments": assignments,
             }
-    except Exception as exc:  # noqa: BLE001 - best-effort enrichment, never fatal
+    except Exception as exc:  # noqa: BLE001 - best effort
         print(f"  (could not fetch moment info for {moment_id}: {exc})", file=sys.stderr)
     return None
 
@@ -241,17 +199,7 @@ def fetch_moment_info(
 def build_lessons_legacy(
     session: Smartschool, start_date: date, cutoff: date, pending: list[dict]
 ) -> list[dict]:
-    """
-    Older Smartschool schools ("classic" agenda) expose lesson-by-lesson data
-    through this XML dispatcher. Some schools have fully moved to the newer
-    "Smartschool Next" planner - for those, this silently returns nothing
-    (Smartschool itself answers with an empty body, not an error), which is
-    why this is always paired with build_lessons_planner_api() below.
-
-    Each call only covers a ~20 day forward window from the date you give it,
-    so for longer ranges we call it a few times with different anchor dates
-    and merge, deduping by moment_id.
-    """
+    """Legacy XML agenda (empty on Smartschool Next schools). Covers ~20 days per call, so call repeatedly and dedupe by moment_id."""
     hours = build_hours_lookup(session)
     by_date: dict[str, list[dict]] = {}
     seen_moment_ids: set[str] = set()
@@ -286,9 +234,9 @@ def build_lessons_legacy(
                 "teacher": lesson.teacher_title or lesson.teacher,
                 "groups": lesson.klassen_title or lesson.klassen,
                 "note": lesson.note,
-                "title": lesson.subject,  # the free-text title/explanation for this lesson
+                "title": lesson.subject,  # lesson title/explanation
                 "has_info": has_flagged_info,
-                "info": None,  # filled in below if has_flagged_info
+                "info": None,  # set below if has_flagged_info
                 "source": "legacy_agenda",
             }
 
@@ -298,7 +246,7 @@ def build_lessons_legacy(
 
             by_date.setdefault(lesson_date.isoformat(), []).append(entry)
 
-        anchor += timedelta(days=18)  # slight overlap with the ~20 day window per call
+        anchor += timedelta(days=18)  # overlap between windows
 
     return by_date
 
@@ -310,20 +258,8 @@ def build_lessons_planner_api(
     pending: list[dict],
     detail_fetcher: planner_details.DetailFetcher | None,
 ) -> dict[str, list[dict]]:
-    """
-    Fetches planner cards (assignments + to-dos) from the newer "Smartschool
-    Next" REST API - the one that matches the card-style planner UI (title
-    bar, teacher/groups/location sidebar, "Info voor de leerling" body).
-
-    Unlike the legacy XML endpoint, this doesn't hand us a general timetable
-    of every lesson - only cards that carry an assignment or to-do - which is
-    exactly the data this tool cares about.
-
-    IMPORTANT: this LIST endpoint only returns each card's title, never its
-    body text - the actual "Info voor de leerling" content (where a real
-    deadline sentence like "De deadline ... is VRIJDAG 25 SEPTEMBER" lives)
-    has to be fetched per-item separately, which is what detail_fetcher does.
-    """
+    """Planner cards (assignments, to-dos) from the Smartschool Next REST API.
+    The list returns titles only; body text is fetched per item by detail_fetcher."""
     user_id = session.authenticated_user["id"]
 
     raw_elements = session.json(
@@ -344,16 +280,13 @@ def build_lessons_planner_api(
         title = str(pe.name)
         element_type = str(pe.planned_element_type)
 
-        # Fetch the real body text ("Info voor de leerling") - see planner_details.py.
+        # body text: see planner_details.py
         detail_payload = None
         if detail_fetcher is not None:
             detail_payload = detail_fetcher.fetch(str(pe.id), element_type, posted_date, title)
         body_text = planner_details.extract_body(detail_payload, title) if detail_payload else ""
 
-        # The task's description on cards stays the TITLE (plus anything the list
-        # payload itself happens to carry). The fetched "Info voor de leerling"
-        # text is kept separately as `body` and shown under the title - keeping
-        # the description stable also keeps the checked-off ids stable.
+        # description stays the title (keeps task ids stable); body is stored separately
         extra_text_parts = []
         for key in ("description", "content", "remark", "comment", "text", "body"):
             val = raw.get(key)
@@ -361,16 +294,12 @@ def build_lessons_planner_api(
                 extra_text_parts.append(val.strip())
         display_text = " ".join([title, *extra_text_parts]).strip()
 
-        # What's scanned for a deadline phrase - the real body text (if we got
-        # it) plus everything else Smartschool sent back for this element,
-        # since a date can end up in an unexpected field too.
+        # deadline scan text: body plus every other field
         raw_fields = _flatten_raw(raw)
         detail_raw_fields = _flatten_raw(detail_payload) if detail_payload else []
         scan_text = " ".join([display_text, body_text] + [v for _, v in raw_fields] + [v for _, v in detail_raw_fields])
 
-        # If Smartschool itself marks this period as a deadline, trust its own
-        # date over any text-guessing. Otherwise resolve what we can now and
-        # queue the rest for the AI batch pass.
+        # Smartschool's own deadline wins; else resolve now or queue for the AI pass
         if pe.period.deadline:
             due_date = pe.period.date_time_to.date().isoformat()
             due_corrected = due_date != posted_date.isoformat()
@@ -385,10 +314,12 @@ def build_lessons_planner_api(
         detail_fields += [[f"detail.{path}", val] for path, val in detail_raw_fields if not _is_technical_field(path)]
 
         assignment = {
-            "id": None,  # filled in once due_date is final - see run()
+            "id": None,  # set in run()
             "type": assignment_type,
             "description": display_text,
             "body": body_text,
+            "attachments": planner_details.extract_links(detail_payload)["attachments"] if detail_payload else [],
+            "weblinks": planner_details.extract_links(detail_payload)["weblinks"] if detail_payload else [],
             "info": None,
             "due_date": due_date,
             "due_date_corrected": due_corrected,
@@ -426,27 +357,13 @@ def build_lessons_planner_api(
 
 
 def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff: date) -> dict[str, list[dict]]:
-    """
-    Best-effort fetch of EVERY class period in the window, including ones with
-    no assignment/to-do attached - i.e. a plain timetable, for the "All
-    Classes" view. build_lessons_planner_api() above deliberately only asks
-    for "planned-assignments,planned-to-dos" (matches what this tool mainly
-    cares about); this tries broader/no type filtering to see if Smartschool
-    hands back plain lessons too.
-
-    NOTE: this is unverified against a live account as of writing - if it
-    doesn't return anything beyond what the other tabs already show, that
-    likely means either this school's plain lessons aren't exposed via this
-    endpoint at all, or the type filter needs a different value than guessed
-    here. Failing gracefully either way rather than crashing.
-    """
+    """Best-effort fetch of every class period (for "All Classes"). Unverified on a live account; fails quietly."""
     user_id = session.authenticated_user["id"]
     url = f"/planner/api/v1/planned-elements/user/{user_id}"
     base_data = {"from": start_date.isoformat(), "to": cutoff.isoformat()}
 
     raw_elements = None
-    # Try a few guesses, broadest first, falling back to the known-working
-    # filter (which just gives the same entries the other tabs already have).
+    # broadest filter first, then the known-working one
     for types_guess in (None, "lessons,planned-assignments,planned-to-dos", "planned-assignments,planned-to-dos"):
         try:
             data = dict(base_data)
@@ -454,7 +371,7 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
                 data["types"] = types_guess
             raw_elements = session.json(url, data=data)
             break
-        except Exception:  # noqa: BLE001 - try the next guess
+        except Exception:  # noqa: BLE001 - next guess
             continue
 
     if raw_elements is None:
@@ -465,7 +382,7 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
     for raw in raw_elements:
         try:
             pe = PlannedElement(**raw)
-        except Exception:  # noqa: BLE001 - skip anything that doesn't fit the known shape
+        except Exception:  # noqa: BLE001 - skip odd shapes
             continue
         posted_date = pe.period.date_time_from.date()
 
@@ -513,14 +430,14 @@ def build_lessons(
             by_date.setdefault(d, []).extend(events)
         if not legacy:
             print("  (legacy agenda endpoint returned nothing - your school is likely on the newer planner)")
-    except Exception as exc:  # noqa: BLE001 - best-effort, the planner API below may still work
+    except Exception as exc:  # noqa: BLE001 - best effort
         print(f"  (legacy agenda fetch failed, continuing with the newer planner API: {exc})", file=sys.stderr)
 
     try:
         planner = build_lessons_planner_api(session, start_date, cutoff, pending, detail_fetcher)
         for d, events in planner.items():
             by_date.setdefault(d, []).extend(events)
-    except Exception as exc:  # noqa: BLE001 - best-effort, legacy source above may still have data
+    except Exception as exc:  # noqa: BLE001 - best effort
         print(f"  (newer planner API fetch failed: {exc})", file=sys.stderr)
 
     days = []
@@ -532,8 +449,7 @@ def build_lessons(
 
 
 def build_future_tasks(session: Smartschool, pending: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Returns (days_for_display, flat_todos) - due dates may still be
-    placeholders pending the AI batch pass at this point."""
+    """Returns (days_for_display, flat_todos); due dates may be placeholders until the AI pass."""
     days = []
     todos = []
     for day in FutureTasks(session):
@@ -587,8 +503,7 @@ def build_future_tasks(session: Smartschool, pending: list[dict]) -> tuple[list[
 
 
 def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> None:
-    """Runs the single batched AI call for everything the synchronous pass
-    couldn't resolve, and patches every registered dict in place."""
+    """One batched AI call for unresolved items; patches registered dicts in place."""
     if not pending:
         return
 
@@ -615,12 +530,77 @@ def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> None:
             entry["due_date_source"] = "ai"
 
 
+def _num(text) -> float | None:
+    try:
+        return float(str(text).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def parse_result(r: dict) -> dict | None:
+    """One evaluation as a dict, parsed from raw JSON so one odd value can't lose every grade."""
+    if not isinstance(r, dict) or r.get("deleted") or r.get("isPublished") is False:
+        return None
+    graphic = r.get("graphic") if isinstance(r.get("graphic"), dict) else {}
+    gtype, desc, value = graphic.get("type"), str(graphic.get("description") or ""), graphic.get("value")
+    score = maximum = percent = None
+    text = ""
+    if gtype == "percentage" and "/" in desc:
+        left, _, right = desc.partition("/")
+        score, maximum = _num(left), _num(right)
+        if score is not None and maximum:
+            percent = round(score / maximum * 100, 1)
+    elif gtype == "percentage" and isinstance(value, (int, float)):
+        percent = float(value)
+    color = str(graphic.get("color") or "").strip().lower()
+    if percent is None and gtype != "percentage":
+        text = str(value if value not in (None, "") else desc).strip()
+    courses = r.get("courses") if isinstance(r.get("courses"), list) else []
+    course = next((c.get("name") for c in courses if isinstance(c, dict) and c.get("name")), "") or (
+        (r.get("component") or {}).get("name") if isinstance(r.get("component"), dict) else ""
+    )
+    owner = r.get("gradebookOwner") if isinstance(r.get("gradebookOwner"), dict) else {}
+    teacher = ((owner.get("name") or {}).get("startingWithFirstName") or "") if isinstance(owner.get("name"), dict) else ""
+    period = (r.get("period") or {}).get("name", "") if isinstance(r.get("period"), dict) else ""
+    feedback = [str(f.get("text")).strip() for f in (r.get("feedback") or []) if isinstance(f, dict) and f.get("text")]
+    return {
+        "id": str(r.get("identifier") or ""),
+        "name": str(r.get("name") or "").strip(),
+        "course": str(course or "Other"),
+        "date": str(r.get("date") or "")[:10],
+        "score": score,
+        "max": maximum,
+        "percent": percent,
+        "text": text,
+        "label": desc.strip() if desc.strip() and desc.strip() != text else "",
+        "color": color,
+        "counts": bool(r.get("doesCount", True)),
+        "period": str(period),
+        "teacher": str(teacher),
+        "feedback": feedback,
+    }
+
+
+def fetch_results(session: Smartschool, max_pages: int = 4) -> tuple[list[dict], str]:
+    """Grades, newest first. Never raises: returns ([], reason) if unavailable."""
+    out: list[dict] = []
+    try:
+        for page in range(1, max_pages + 1):
+            data = session.json(f"/results/api/v1/evaluations/?pageNumber={page}&itemsOnPage=50")
+            if not isinstance(data, list):
+                break
+            out.extend(p for p in (parse_result(r) for r in data) if p)
+            if len(data) < 50:
+                break
+    except Exception as exc:  # noqa: BLE001 - optional tab
+        print(f"  (could not fetch grades: {exc})", file=sys.stderr)
+        return out, f"Grades unavailable: {str(exc)[:120]}"
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return out, ""
+
+
 def run(days_back: int = 10, days_ahead: int = 21) -> dict:
-    """
-    Does the full sync and writes data/planner_data.json. Returns the same
-    data as a dict, so callers (the CLI below, or the desktop app) can use it
-    directly without re-reading the file.
-    """
+    """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
     creds = PathCredentials(str(ROOT / "credentials.yml"))
     session = Smartschool(creds)
@@ -631,7 +611,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     try:
         platform_id = session.platform_id
         user_id = session.authenticated_user["id"]
-    except Exception:  # noqa: BLE001 - deep links / detail fetch are best-effort, never block a sync over them
+    except Exception:  # noqa: BLE001 - never block a sync
         platform_id, user_id = None, None
 
     DATA_DIR.mkdir(exist_ok=True)
@@ -655,7 +635,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     print("Fetching upcoming tasks/tests...")
     try:
         future_tasks, todos = build_future_tasks(session, pending)
-    except Exception as exc:  # noqa: BLE001 - this endpoint is optional/best-effort
+    except Exception as exc:  # noqa: BLE001 - optional
         print(f"  (could not fetch the separate future-tasks list: {exc})", file=sys.stderr)
         print("  Continuing without it - lesson-level to-dos below still work.", file=sys.stderr)
         future_tasks, todos = [], []
@@ -666,10 +646,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     print(f"Resolving due dates ({len(pending)} item(s) need a closer look)...")
     resolve_ai_pending(pending, gemini_api_key)
 
-    # Now that every due date is FINAL, fold lesson-level assignments into the
-    # flat to-do list and assign stable ids (must happen after AI resolution -
-    # the id is derived from the due date, so an id computed earlier would go
-    # stale the moment AI corrects a date).
+    # due dates final: merge lesson assignments into to-dos, assign ids
     for day in lessons_by_day:
         for ev in day["events"]:
             if ev["info"]:
@@ -681,6 +658,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
                             "type": a["type"],
                             "description": a["description"],
                             "body": a.get("body", ""),
+                            "attachments": a.get("attachments", []),
+                            "weblinks": a.get("weblinks", []),
                             "warning": a["warning"],
                             "posted_date": day["date"],
                             "due_date": a["due_date"],
@@ -704,13 +683,16 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     print("Fetching full timetable (all classes, even without to-dos)...")
     try:
         all_classes_by_date = build_all_classes_planner_api(session, start_date, cutoff)
-    except Exception as exc:  # noqa: BLE001 - best-effort, optional tab
+    except Exception as exc:  # noqa: BLE001 - optional tab
         print(f"  (could not fetch the full timetable: {exc})", file=sys.stderr)
         all_classes_by_date = {}
     all_classes = [
         {"date": d, "events": sorted(events, key=lambda e: e["start"])}
         for d, events in sorted(all_classes_by_date.items())
     ]
+
+    print("Fetching grades...")
+    results, results_note = fetch_results(session)
 
     output = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -721,6 +703,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "future_tasks": future_tasks,
         "todos": todos,
         "all_classes": all_classes,
+        "results": results,
+        "results_note": results_note,
         "diagnostics": {
             "regex_parser_enabled": USE_REGEX_DEADLINE_PARSER,
             "gemini_configured": bool(gemini_api_key),

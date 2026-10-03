@@ -1,0 +1,12 @@
+# never commit or share these
+credentials.yml
+data/
+dashboard.html
+
+# build leftovers
+build/
+dist/
+*.spec
+SmartschoolPlanner.exe
+installer_output/
+__pycache__/

@@ -1,8 +1,6 @@
-"""
-Fetches the full text ("Info voor de leerling") of planner assignments.
-
-
-"""
+"""Fetches each assignment's body text ("Info voor de leerling"), which the list endpoint omits.
+Tries likely routes (mirroring the web app's URLs) once and remembers the one that works;
+override with `planner_detail_url` in credentials.yml."""
 
 from __future__ import annotations
 
@@ -12,11 +10,9 @@ import re
 from datetime import date
 from pathlib import Path
 
-# {id} = the element's UUID, {platform_id}/{user_id} = your account's ids,
-# {type} = e.g. "planned-assignments", {date} = the day the task is planned on.
+# placeholders: {id} element UUID, {platform_id}/{user_id}, {type} e.g. "planned-assignments", {date}
 CANDIDATE_TEMPLATES = [
-    # The smartschool library itself calls /lesson-content/api/v1/assignments/... (for assignment
-    # types), so that service is where assignment text most likely lives.
+    # the library calls /lesson-content/api/v1/assignments/..., so text likely lives there
     "/lesson-content/api/v1/assignments/{platform_id}/{id}",
     "/lesson-content/api/v1/assignments/{id}",
     "/lesson-content/api/v1/assignments/{platform_id}/{id}/details",
@@ -29,16 +25,15 @@ CANDIDATE_TEMPLATES = [
     "/planner/api/v1/planned-elements/user/{user_id}/{id}",
 ]
 
-# Keys whose values are likely to hold human-readable task text.
-# Bump when CANDIDATE_TEMPLATES changes so a "nothing worked today" result saved by an
-# older version doesn't stop the new routes from being tried.
+# keys likely holding task text
+# bump when CANDIDATE_TEMPLATES changes so an old "nothing worked" result is retried
 PROBE_VERSION = 2
 
 _TEXTY_KEYS = (
     "description", "content", "text", "body", "info", "instruction",
     "html", "message", "remark", "comment", "summary", "explanation",
 )
-# Keys that are never task text, even if their value is a long string.
+# keys that are never task text
 _NOISE_KEYS = {
     "id", "platformid", "identifier", "pictureurl", "picturehash", "sort",
     "color", "icon", "type", "schedulecodes", "url", "href",
@@ -50,7 +45,7 @@ _BLOCK_TAGS = ["p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "ul",
 
 
 def flatten_json(obj, prefix: str = "") -> list[tuple[str, str]]:
-    """Every non-empty string/number leaf of a nested JSON structure as (path, value)."""
+    """Non-empty string/number leaves of nested JSON as (path, value)."""
     out: list[tuple[str, str]] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -68,9 +63,7 @@ def flatten_json(obj, prefix: str = "") -> list[tuple[str, str]]:
 
 
 def html_to_text(value: str) -> str:
-    """Smartschool descriptions are HTML. Turn one into readable plain text,
-    keeping paragraph breaks but NOT splitting sentences at inline tags like
-    <strong> (so "is <strong>VRIJDAG 25 SEPTEMBER</strong>." stays one line)."""
+    """HTML description -> plain text; keeps paragraph breaks, not inline-tag splits."""
     if not value:
         return ""
     text = value
@@ -87,7 +80,7 @@ def html_to_text(value: str) -> str:
                 tag.insert_before("\n")
                 tag.append("\n")
             text = soup.get_text("")
-        except Exception:  # noqa: BLE001 - fall back to a crude tag strip
+        except Exception:  # noqa: BLE001 - crude tag strip
             text = _TAG_RE.sub(" ", value)
     text = html_lib.unescape(text).replace("\xa0", " ")
 
@@ -108,15 +101,12 @@ def _last_key(path: str) -> str:
     return path.rsplit(".", 1)[-1].split("[")[0].lower()
 
 
-# Smartschool's "Info voor de leerling" box is the element's top-level `publicInfo`
-# (confirmed from a real reply: capabilities.canUserSeeProperties lists publicInfo for
-# students; `privateInfo` is only the user's own note and `info` is hidden from students).
-# Fields nested under `linkedPlannedElement` belong to the linked LESSON, not this task.
+# "Info voor de leerling" = top-level `publicInfo`; ignore `info`, `privateInfo`, `linkedPlannedElement`
 _PRIMARY_KEYS = ("publicInfo", "info")
 
 
 def extract_body(payload, title: str) -> str:
-    """Pull the human-readable task text ("Info voor de leerling") out of a detail payload."""
+    """Task text ("Info voor de leerling") from a detail payload."""
     if isinstance(payload, dict) and any(k in payload for k in _PRIMARY_KEYS):
         for key in _PRIMARY_KEYS:
             value = payload.get(key)
@@ -124,9 +114,9 @@ def extract_body(payload, title: str) -> str:
                 text = html_to_text(value)
                 if text and text.strip().lower() != (title or "").strip().lower():
                     return text
-        return ""  # the task simply has no info text
+        return ""  # no info text
 
-    # Unknown payload shape: fall back to guessing from likely field names.
+    # unknown shape: guess from field names
     if isinstance(payload, dict):
         payload = {k: v for k, v in payload.items() if k != "linkedPlannedElement"}
     flat = flatten_json(payload)
@@ -142,7 +132,7 @@ def extract_body(payload, title: str) -> str:
         return len(value) >= 3
 
     texty = [(p, v) for p, v in flat if usable(p, v) and any(k in _last_key(p) for k in _TEXTY_KEYS)]
-    if not texty:  # fall back to any long string that isn't obviously plumbing
+    if not texty:  # any long non-plumbing string
         texty = [(p, v) for p, v in flat if usable(p, v) and len(v) > 80]
 
     seen: set[str] = set()
@@ -156,7 +146,7 @@ def extract_body(payload, title: str) -> str:
 
 
 class DetailFetcher:
-    """Fetches assignment detail payloads, discovering the working route once."""
+    """Fetches detail payloads, discovering the working route once."""
 
     def __init__(self, session, state_file: Path, platform_id, user_id, custom_template: str | None = None):
         self.session = session
@@ -171,12 +161,12 @@ class DetailFetcher:
         self.attempts: list[str] = []
         self._cache: dict[str, dict | None] = {}
         self._probed_this_run = False
-        self.route_is_saved = False  # True when the route came from the saved file (known to work once)
+        self.route_is_saved = False  # route came from the saved file
         self._type_ok: dict[str, int] = {}
         self._type_fail: dict[str, int] = {}
         self._load_state()
 
-    # -- persisted "which route works" state ---------------------------------
+    # -- saved route --
     def _load_state(self) -> None:
         if self.custom_template:
             self.template = self.custom_template
@@ -188,15 +178,14 @@ class DetailFetcher:
         if state.get("template"):
             self.template = state["template"]
             self.route_is_saved = True
-            # Saved routes were learned on an assignment; other element types (to-dos,
-            # activities...) use their own type in the same spot of the URL.
+            # saved routes were learned on assignments; other types swap their own type into the URL
             self.template = self.template.replace("/planned-assignments/", "/{type}/")
         elif state.get("failed_on") == date.today().isoformat() and state.get("probe_version") == PROBE_VERSION:
-            self.disabled = True  # already tried today, don't hammer Smartschool
+            self.disabled = True  # tried today already
 
     def _save_state(self, template: str | None, failed: bool) -> None:
         if self.custom_template or (self.route_is_saved and template is None):
-            return  # never overwrite a route that is known to work with a failure
+            return  # never overwrite a working route with a failure
         try:
             self.state_file.parent.mkdir(exist_ok=True)
             self.state_file.write_text(
@@ -212,7 +201,7 @@ class DetailFetcher:
         except OSError:
             pass
 
-    # -- fetching -------------------------------------------------------------
+    # -- fetching --
     def _get(self, template: str, ctx: dict) -> dict | None:
         try:
             url = template.format(**ctx)
@@ -221,7 +210,7 @@ class DetailFetcher:
             return None
         try:
             payload = self.session.json(url)
-        except Exception as exc:  # noqa: BLE001 - 404s etc. are expected while probing
+        except Exception as exc:  # noqa: BLE001 - expected while probing
             resp = exc.args[1] if len(getattr(exc, "args", ())) > 1 else None
             status = getattr(resp, "status_code", None)
             self.attempts.append(f"{url} -> {f'HTTP {status}' if status else type(exc).__name__}: {str(exc)[:100]}")
@@ -254,8 +243,7 @@ class DetailFetcher:
             "title": title,
         }
 
-        # Some element types (lessons, placeholders...) have no detail page. After a few
-        # failures with no success for a type, stop asking for that type this run.
+        # stop asking a type after a few failures with no success
         if self._type_fail.get(element_type, 0) >= 3 and not self._type_ok.get(element_type):
             self._cache[element_id] = None
             return None
@@ -264,7 +252,7 @@ class DetailFetcher:
         if self.template:
             payload = self._get(self.template, ctx)
         elif not self.custom_template and element_type == "planned-assignments":
-            # No known route yet: probe the candidates, on an assignment only.
+            # no route yet: probe on an assignment
             self._probed_this_run = True
             for candidate in CANDIDATE_TEMPLATES:
                 payload = self._get(candidate, ctx)
@@ -284,7 +272,7 @@ class DetailFetcher:
             self.ok_count += 1
             self._type_ok[element_type] = self._type_ok.get(element_type, 0) + 1
             if self.template and not self.route_is_saved and not self.custom_template:
-                pass  # already saved when discovered
+                pass  # saved on discovery
         self._cache[element_id] = payload
         return payload
 
@@ -300,12 +288,11 @@ class DetailFetcher:
         return "n/a"
 
 
-# ---- route discovery helpers (used by discover_detail_endpoint.py) ---------------
+# ---- route discovery helpers ----
 _API_STR_RE = re.compile(r"""["'`]((?:https?://[^"'`\s/]+)?/?[\w\-./]*api/v\d+/[\w\-./${}:+]*)["'`]""")
 
 def api_paths_from_js(js_text: str) -> set[str]:
-    """API path strings found in a JS bundle. `${x}` and `:x` placeholders become `{}`;
-    a trailing-slash fragment (built up with + or .concat in the bundle) is kept as-is."""
+    """API paths in a JS bundle; `${x}`/`:x` become `{}`, trailing-slash fragments kept."""
     found: set[str] = set()
     for m in _API_STR_RE.finditer(js_text):
         path = re.sub(r"^https?://[^/]+", "", m.group(1))
@@ -318,17 +305,16 @@ def api_paths_from_js(js_text: str) -> set[str]:
 
 
 def expand_path(path: str, ctx: dict) -> list[str]:
-    """Turn a discovered path/fragment into concrete URLs by filling placeholders with
-    every sensible ordering of this account's platform id / element id / user id."""
+    """Concrete URLs from a path, filling placeholders with every ordering of platform/element/user id."""
     from itertools import permutations
 
     values = [str(ctx["platform_id"]), str(ctx["id"]), str(ctx["user_id"])]
-    if ctx.get("type") and "{}/" in path[:2] + path:  # only matters when a type slot is possible
+    if ctx.get("type") and "{}/" in path[:2] + path:  # only when a type slot is possible
         values.append(str(ctx["type"]))
     n = path.count("{}")
     urls: list[str] = []
     if n == 0:
-        if path.endswith("/"):  # fragment: the rest was appended in JS
+        if path.endswith("/"):  # fragment: rest appended in JS
             urls += [path + values[1], path + f"{values[0]}/{values[1]}"]
         else:
             urls.append(path)
@@ -343,15 +329,12 @@ def expand_path(path: str, ctx: dict) -> list[str]:
     return urls
 
 
-# ---- fragment harvesting: the JS only spells out a service's base URL ("/planner/api/v1/")
-# once; each call then appends its own tail (`${base}/assignments/${id}`). These helpers
-# collect those tails so they can be glued onto the base URLs.
+# ---- fragment harvesting: collect URL tails the JS appends to a base ----
 _FRAGMENT_RE = re.compile(r"""[`"']([^`"'\s]{0,80}(?:assign|to-?do|planned|detail)[^`"'\s]{0,80})[`"']""", re.I)
 
 
 def fragments_from_js(js_text: str) -> set[str]:
-    """Path-like string literals mentioning assignments/planned items/to-dos/details,
-    with `${x}` placeholders turned into `{}` and any leading slash/base stripped."""
+    """Path-like literals about assignments/planned items/to-dos/details, placeholders as `{}`, base stripped."""
     out: set[str] = set()
     for m in _FRAGMENT_RE.finditer(js_text):
         frag = m.group(1)
@@ -366,7 +349,7 @@ def fragments_from_js(js_text: str) -> set[str]:
 
 
 def snippets_from_js(js_text: str, needles=("assignments", "planned-elements"), width: int = 170, limit: int = 40) -> list[str]:
-    """Text around each mention of a needle - for humans (and me) to read when guessing fails."""
+    """Text around each mention of a needle."""
     found: list[str] = []
     for needle in needles:
         for m in re.finditer(re.escape(needle), js_text):
@@ -377,7 +360,7 @@ def snippets_from_js(js_text: str, needles=("assignments", "planned-elements"), 
     return found
 
 
-# ---- full route table: every `api.<service>.baseUrl}<tail>` call in the web app --------
+# ---- route table: every api.<service>.baseUrl}<tail> call ----
 _ELEMENT_TYPE_NAMES = {
     "ASSIGNMENT": "planned-assignments", "ACTIVITY": "planned-activities", "LESSON": "planned-lessons",
     "MEETING": "planned-meetings", "TODO": "planned-to-dos", "GENERIC": "planned-generics",
@@ -395,10 +378,8 @@ def _kebab(name: str) -> str:
 
 
 def routes_from_js(js_text: str) -> set[tuple[str, str]]:
-    """(service, tail) pairs for every API call of the form ${...baseUrl}<tail>.
-    service is e.g. "planner" / "lesson-content" (or "" when the bundle doesn't say).
-    `${...PLE_ASSIGNMENT_ELEMENT_TYPE}` becomes "planned-assignments"; other `${x}` become `{}`;
-    query strings are dropped."""
+    """(service, tail) pairs for ${...baseUrl}<tail> calls; service may be "".
+    PLE_ASSIGNMENT_ELEMENT_TYPE -> "planned-assignments", other ${x} -> `{}`, queries dropped."""
     out: set[tuple[str, str]] = set()
     for m in _ROUTE_RE.finditer(js_text):
         service, tail = _kebab(m.group(1) or ""), m.group(2)
@@ -413,3 +394,33 @@ def routes_from_js(js_text: str) -> set[tuple[str, str]]:
 
 def route_is_safe_to_try(tail: str) -> bool:
     return not _UNSAFE_WORDS.search(tail)
+
+
+# ---- attachments and weblinks ----
+_LINK_NAME_KEYS = ("name", "title", "fileName", "filename", "label", "description", "displayName")
+_LINK_URL_KEYS = ("url", "href", "link", "downloadUrl", "fileUrl", "uri")
+
+
+def _link_entry(item) -> dict | None:
+    if isinstance(item, str):
+        item = {"url": item} if item.startswith(("http://", "https://")) else {"name": item}
+    if not isinstance(item, dict):
+        return None
+    name = next((str(item[k]).strip() for k in _LINK_NAME_KEYS if isinstance(item.get(k), str) and item[k].strip()), "")
+    url = next((str(item[k]).strip() for k in _LINK_URL_KEYS if isinstance(item.get(k), str) and item[k].strip()), "")
+    size = item.get("size") if isinstance(item.get("size"), (int, float)) else item.get("fileSize")
+    if not name and not url:
+        return None
+    return {"name": name or url, "url": url if url.startswith(("http://", "https://")) else "", "size": size if isinstance(size, (int, float)) else None}
+
+
+def extract_links(payload) -> dict:
+    """{"attachments": [...], "weblinks": [...]} from the task's own top-level lists (shape unverified, read defensively)."""
+    out = {"attachments": [], "weblinks": []}
+    if not isinstance(payload, dict):
+        return out
+    for key in ("attachments", "weblinks"):
+        items = payload.get(key)
+        if isinstance(items, list):
+            out[key] = [e for e in (_link_entry(i) for i in items) if e]
+    return out

@@ -1,20 +1,6 @@
-"""
-Deadline detection using Google's Gemini API (Google AI Studio free tier).
-
-Everything a sync wants to know is sent in ONE request (chunked at 40 tasks,
-so a sync is normally a single call), and every answer is cached on disk so
-unchanged tasks are never asked about twice. A persistent PER-MODEL rate limiter
-keeps usage under the free-tier limits below across syncs and app restarts, and
-if a model is overloaded (503) or used up (429) the next model in MODEL_CHAIN is
-tried instead of retrying the broken one.
-
-Design rules (because a wrong date is worse than no date):
-  * the model is told to answer null unless the text itself states a deadline
-  * an answer equal to (or before) the posted date is discarded - that's not a
-    correction, it's the model defaulting
-  * an answer more than MAX_DAYS_AHEAD days out is discarded as implausible
-  * anything that fails just leaves the task on its posted date
-"""
+"""Deadline detection via Gemini (free tier). One batched, disk-cached request per sync;
+per-model rate limits; falls through MODEL_CHAIN on 503/429. A null, posted-date or implausibly
+far answer is discarded."""
 
 from __future__ import annotations
 
@@ -26,15 +12,9 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-# ---- Models, tried in this order --------------------------------------------
-# Free-tier limits are PER MODEL (check https://aistudio.google.com/rate-limit -
-# Google changes them often). Numbers below are from your own dashboard:
-#   * Flash-Lite models: 15 requests/min, 500 requests/day  <- plenty for this job
-#   * full "Flash" models:  5 requests/min,  20 requests/day  <- used up after a few syncs
-# So the cheap Lite models go first (extracting a date from a sentence doesn't need
-# a big model), and the full Flash models are only a last resort. Each model has
-# its own quota, so falling through the list also multiplies what you can use.
-# If a model id ever 404s it is skipped for the day, so a stale entry is harmless.
+# ---- Models, in order ----
+# Free-tier limits are per model: Flash-Lite 15 rpm / 500 rpd, full Flash 5 rpm / 20 rpd,
+# so Lite goes first. A model that 404s is skipped for the day.
 MODEL_CHAIN = [
     # (model id,              rpm, tpm,     rpd)
     ("gemini-3.1-flash-lite", 15, 250_000, 500),
@@ -44,18 +24,17 @@ MODEL_CHAIN = [
     ("gemini-3.6-flash",       5, 250_000,  20),
     ("gemini-3.5-flash",       5, 250_000,  20),
 ]
-SAFETY_FACTOR = 0.8                  # stay at 80% of every limit above
+SAFETY_FACTOR = 0.8                  # 80% of each limit
 
-MAX_ITEMS_PER_REQUEST = 40           # tasks per request (a sync is normally exactly 1 request)
-MAX_TEXT_CHARS = 1500                # per task; keeps prompts small
-MAX_DAYS_AHEAD = 120                 # deadlines further out than this are treated as nonsense
-REQUEST_TIMEOUT_MS = 60_000          # a hung connection must fail, not block the sync forever
-TRANSIENT_RETRY_DELAY = 3            # seconds before the ONE same-model retry after a 5xx
-MAX_SLOT_WAIT_SECONDS = 15           # wait at most this long for a per-minute slot, else try the next model
-COOLDOWN_AFTER_429_SECONDS = 65      # a per-minute 429 -> skip that model for a bit
+MAX_ITEMS_PER_REQUEST = 40           # tasks per request
+MAX_TEXT_CHARS = 1500                # max chars per task
+MAX_DAYS_AHEAD = 120                 # max days ahead
+REQUEST_TIMEOUT_MS = 60_000          # request timeout
+TRANSIENT_RETRY_DELAY = 3            # seconds before the one 5xx retry
+MAX_SLOT_WAIT_SECONDS = 15           # max wait for a per-minute slot
+COOLDOWN_AFTER_429_SECONDS = 65      # skip the model after a per-minute 429
 
-# Skip tasks whose text has nothing date-like in it at all (saves quota; the
-# answer would be "null" anyway). Set False to send every task.
+# skip tasks with nothing date-like (saves quota); False sends all
 SKIP_TEXT_WITHOUT_DATE_HINTS = True
 
 _client = None
@@ -78,13 +57,13 @@ def looks_worth_asking(text: str) -> bool:
     return len(text.strip()) >= 12 and bool(_HINT_RE.search(text))
 
 
-# ---- persistent, per-model rate limiter ----------------------------------------
+# ---- rate limiter ----
 def _pacific_day() -> str:
     try:
         from zoneinfo import ZoneInfo
 
         return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
-    except Exception:  # noqa: BLE001 - no tz database (needs the 'tzdata' package on Windows)
+    except Exception:  # noqa: BLE001 - needs tzdata on Windows
         return (datetime.now(timezone.utc) - timedelta(hours=8)).date().isoformat()
 
 
@@ -97,11 +76,8 @@ class AllModelsFailed(Exception):
 
 
 class UsageLimiter:
-    """Per-model requests/min, tokens/min and requests/day (Pacific day), saved to disk.
-
-    Also remembers, for the rest of the day, models that are used up or don't exist,
-    and short cooldowns after a per-minute 429.
-    """
+    """Per-model limits (rpm, tpm, rpd on the Pacific day), plus same-day blocks for used-up/missing
+    models and short 429 cooldowns."""
 
     def __init__(self, path: Path | None):
         self.path = path
@@ -127,7 +103,7 @@ class UsageLimiter:
 
     def _m(self, model: str, now: float) -> dict:
         today = _pacific_day()
-        if self.state.get("day") != today:  # new Pacific day: everything resets
+        if self.state.get("day") != today:  # new day: reset
             self.state = {"version": 2, "day": today, "models": {}}
         m = self.state["models"].setdefault(
             model, {"requests_today": 0, "recent": [], "blocked_today": "", "cooldown_until": 0}
@@ -145,7 +121,7 @@ class UsageLimiter:
             pass
 
     def wait_for_slot(self, model: str, est_tokens: int) -> None:
-        """Brief wait until `model` has room; raises LimitReached if it can't be used right now."""
+        """Wait briefly for room on `model`; raises LimitReached if unusable now."""
         max_rpm, max_tpm, max_rpd = self.limits(model)
         deadline = time.time() + MAX_SLOT_WAIT_SECONDS
         while True:
@@ -166,7 +142,7 @@ class UsageLimiter:
             time.sleep(max(wait, 0.5))
 
     def record(self, model: str, est_tokens: int) -> None:
-        # Failed requests can count toward Google's quota too, so record every attempt.
+        # failures count toward quota too
         now = time.time()
         m = self._m(model, now)
         m["recent"].append([now, est_tokens])
@@ -182,15 +158,15 @@ class UsageLimiter:
         self._save()
 
 
-# ---- client ----------------------------------------------------------------------
+# ---- client ----
 def _get_client(api_key: str):
     global _client, _client_key
     if _client is None or _client_key != api_key:
-        from google import genai  # lazy: only needed when a key is configured
+        from google import genai  # lazy import
 
         try:
             _client = genai.Client(api_key=api_key, http_options={"timeout": REQUEST_TIMEOUT_MS})
-        except Exception:  # noqa: BLE001 - older SDK without http_options support
+        except Exception:  # noqa: BLE001 - older SDK
             _client = genai.Client(api_key=api_key)
         _client_key = api_key
     return _client
@@ -206,29 +182,39 @@ def _error_code(exc: Exception) -> int | None:
 
 
 def _is_transient(exc: Exception, code: int | None) -> bool:
-    """503 'model is overloaded' (and friends), plus timeouts/dropped connections."""
+    """503 overloaded etc., plus timeouts and dropped connections."""
     if code in (500, 502, 503, 504):
         return True
     text = f"{type(exc).__name__} {exc}".lower()
     return code is None and any(w in text for w in ("timeout", "timed out", "unavailable", "overloaded", "connection"))
 
 
-def _generate(client, prompt: str, limiter: UsageLimiter):
-    """
-    One request, walking down MODEL_CHAIN until a model answers.
-    Returns (response, model_used). Raises AllModelsFailed / LimitReached / a real error.
+def _generate(
+    client,
+    prompt: str,
+    limiter: UsageLimiter,
+    json_mode: bool = True,
+    accept=None,
+    time_budget: float | None = None,
+    continue_on_error: bool = False,
+):
+    """Walk MODEL_CHAIN until a model answers; returns (response, model_used).
+    Raises AllModelsFailed / LimitReached / a real error.
 
-    Why this shape (see also Google's docs on 503 UNAVAILABLE): a 503 means THAT model
-    is overloaded right now, regardless of your quota - hammering it with retries
-    only burns your daily requests. So: one short retry, then move to the next model.
-    """
+    accept: rejects a response (counts as that model failing). time_budget: seconds before no new
+    models are tried. continue_on_error: move on after 400/401/403. On a 503: one short retry, then
+    the next model."""
     global _last_model_used
     est_tokens = len(prompt) // 3 + 500
     problems: list[str] = []
-    limit_only = True  # True while every model was skipped purely because of our own limits
+    limit_only = True  # all skipped by our own limits
+    started = time.monotonic()
 
     for model, *_ in MODEL_CHAIN:
         for attempt in range(2):
+            if time_budget is not None and time.monotonic() - started > time_budget:
+                problems.append("ran out of time")
+                raise AllModelsFailed("; ".join(problems))
             try:
                 limiter.wait_for_slot(model, est_tokens)
             except LimitReached as exc:
@@ -239,9 +225,17 @@ def _generate(client, prompt: str, limiter: UsageLimiter):
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
-                    config={"response_mime_type": "application/json", "temperature": 0},
+                    config=(
+                        {"response_mime_type": "application/json", "temperature": 0}
+                        if json_mode
+                        # no max_output_tokens: thinking tokens count against it and can empty the reply
+                        else {"temperature": 0.4}
+                    ),
                 )
                 limiter.record(model, est_tokens)
+                if accept is not None and not accept(response):
+                    problems.append(f"{model}: empty answer")
+                    break
                 _last_model_used = model
                 return response, model
             except Exception as exc:  # noqa: BLE001
@@ -265,14 +259,17 @@ def _generate(client, prompt: str, limiter: UsageLimiter):
                     limiter.block_today(model, "model not available for this key")
                     problems.append(f"{model}: not found (404)")
                     break
-                raise  # 400/401/403 etc: our request or key is wrong - another model won't fix it
+                if continue_on_error:
+                    problems.append(f"{model}: {type(exc).__name__} {str(exc)[:140]}")
+                    break
+                raise  # 400/401/403: bad request or key, another model won't help
 
     if limit_only:
         raise LimitReached("; ".join(problems) or "no model available")
     raise AllModelsFailed("; ".join(problems))
 
 
-# ---- prompt / parsing ------------------------------------------------------------
+# ---- prompt / parsing ----
 PROMPT = """You extract homework/assignment DEADLINES from teachers' task descriptions. The texts are mostly Dutch, sometimes French, German or English.
 
 For each numbered item you get the day the task was posted (with its weekday) and the task text. Decide the date the work must be handed in / is due / the test or presentation takes place.
@@ -316,7 +313,7 @@ def _save_cache(path: Path | None, cache: dict) -> None:
 
 
 def _validated(raw_date, confidence, posted: date) -> date | None:
-    """Only a confident, plausible date that actually differs from the posted day counts."""
+    """A confident, plausible date that differs from the posted day."""
     if not raw_date or raw_date == "null" or confidence != "high":
         return None
     try:
@@ -347,18 +344,15 @@ def _parse_response(text: str) -> dict[int, tuple] | None:
     return out
 
 
-# ---- public API ------------------------------------------------------------------
+# ---- public API ----
 def extract_due_dates_batch(
     items: list[tuple[str, date]],
     api_key: str | None,
     cache_file: Path | None = None,
     usage_file: Path | None = None,
 ) -> tuple[list[date | None], str]:
-    """
-    items: [(task_text, posted_date), ...]
-    Returns (results, note): results[i] is the detected deadline for items[i] or
-    None; note is a short human-readable summary (or "" if nothing to say).
-    """
+    """items: [(task_text, posted_date), ...]. Returns (results, note): detected date or None per item,
+    plus a short summary ("" if none)."""
     results: list[date | None] = [None] * len(items)
     if not items or not api_key:
         return results, ""
@@ -429,7 +423,7 @@ def extract_due_dates_batch(
             break
         for n, k in enumerate(chunk):
             if n not in parsed:
-                continue  # model skipped it; don't cache, ask again next time
+                continue  # skipped: don't cache
             posted = pending_info[k][1]
             d = _validated(parsed[n][0], parsed[n][1], posted)
             cache[k] = d.isoformat() if d else None
