@@ -27,7 +27,7 @@ MODEL_CHAIN = [
 SAFETY_FACTOR = 0.8                  # 80% of each limit
 
 MAX_ITEMS_PER_REQUEST = 40           # tasks per request
-MAX_TEXT_CHARS = 1500                # max chars per task
+MAX_TEXT_CHARS = 1500                # max chars per task (long texts keep their start AND end)
 MAX_DAYS_AHEAD = 120                 # max days ahead
 REQUEST_TIMEOUT_MS = 60_000          # request timeout
 TRANSIENT_RETRY_DELAY = 3            # seconds before the one 5xx retry
@@ -288,8 +288,18 @@ __ITEMS__
 """
 
 
+def _clip(text: str) -> str:
+    """Fit a task text into MAX_TEXT_CHARS. Deadlines are often the last sentence, so keep the start and the end."""
+    text = text.strip()
+    if len(text) <= MAX_TEXT_CHARS:
+        return text
+    head = int(MAX_TEXT_CHARS * 0.55)
+    tail = MAX_TEXT_CHARS - head - 5
+    return text[:head].rstrip() + " ... " + text[-tail:].lstrip()
+
+
 def _cache_key(text: str, posted: date) -> str:
-    return hashlib.sha1(f"{posted.isoformat()}|{text[:MAX_TEXT_CHARS]}".encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1(f"{posted.isoformat()}|{_clip(text)}".encode("utf-8")).hexdigest()[:20]
 
 
 def _load_cache(path: Path | None) -> dict:
@@ -372,7 +382,7 @@ def extract_due_dates_batch(
             results[i] = _validated(cache[key], "high", posted) if cache[key] else None
             continue
         pending.setdefault(key, []).append(i)
-        pending_info[key] = (text[:MAX_TEXT_CHARS], posted)
+        pending_info[key] = (_clip(text), posted)
 
     if not pending:
         return results, ""

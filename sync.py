@@ -148,6 +148,35 @@ def _is_technical_field(path: str) -> bool:
     return last in _TECHNICAL_LEAF_NAMES
 
 
+_ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([.,]\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
+_UUID_LIKE_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def build_deadline_text(display_text: str, body_text: str, raw_fields, detail_raw_fields) -> str:
+    """Text the deadline detector reads for one task.
+
+    Normally just the title plus "Info voor de leerling" (the student-facing text). Teacher-only
+    notes, linked items, ids and timestamps are left out: they only add noise, burn the per-task
+    length limit and make every task look date-like. If the body couldn't be fetched, fall back to
+    the other text fields, still without ids and timestamps.
+    """
+    if body_text and body_text.strip():
+        return f"{display_text}\n\n{body_text}".strip()
+    parts = [display_text]
+    for path, value in list(raw_fields) + list(detail_raw_fields):
+        v = str(value).strip()
+        if not v or _is_technical_field(path) or _ISO_TS_RE.match(v) or _UUID_LIKE_RE.match(v):
+            continue
+        if path.rsplit(".", 1)[-1].split("[")[0].lower() in ("privateinfo", "linkedplannedelement"):
+            continue
+        if ".linkedPlannedElement" in path or "privateInfo" in path:
+            continue
+        if v.lower() in display_text.lower():
+            continue  # already included (e.g. the title again)
+        parts.append(v)
+    return " ".join(parts).strip()
+
+
 def fetch_moment_info(
     session: Smartschool, moment_id: str, lesson_date: date, course: str, pending: list[dict]
 ) -> dict | None:
@@ -297,7 +326,7 @@ def build_lessons_planner_api(
         # deadline scan text: body plus every other field
         raw_fields = _flatten_raw(raw)
         detail_raw_fields = _flatten_raw(detail_payload) if detail_payload else []
-        scan_text = " ".join([display_text, body_text] + [v for _, v in raw_fields] + [v for _, v in detail_raw_fields])
+        scan_text = build_deadline_text(display_text, body_text, raw_fields, detail_raw_fields)
 
         # Smartschool's own deadline wins; else resolve now or queue for the AI pass
         if pe.period.deadline:
