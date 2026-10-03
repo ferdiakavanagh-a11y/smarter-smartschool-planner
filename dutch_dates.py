@@ -1,6 +1,5 @@
-"""
-claude generated fallback for if the ai fails or you need to verify deadlines without internet.
-"""
+"""Finds a task's real deadline in free text ("tegen donderdag", "ten laatste op 30/09"), relative to the posting date.
+Best-effort: misses fall back to the posted date; signal words limit false positives."""
 
 from __future__ import annotations
 
@@ -54,8 +53,7 @@ DUTCH_MONTHS = {
     "oktober": 10,
     "november": 11,
     "december": 12,
-    # English (months already covered above are spelled the same or handled by
-    # the Dutch entry - only the genuinely different English spellings are added)
+    # English (only spellings not covered above)
     "january": 1,
     "february": 2,
     "march": 3,
@@ -74,26 +72,15 @@ DUTCH_MONTHS = {
     "octobre": 10,
     "novembre": 11,
     "décembre": 12,
-    # German (only spellings not already covered above)
+    # German (new spellings only)
     "januar": 1,
     "februar": 2,
     "märz": 3,
     "dezember": 12,
 }
 
-# Words that signal "there's a deadline nearby in this text", not just an
-# incidental date mention. Deliberately NOT matching a bare "op" or "voor" -
-# too common in Dutch and would false-positive on things like "besproken op
-# donderdag vorige week". Test/toets dates get their own narrower phrase
-# instead ("toets op ...", "test op ...").
-#
-# This school also teaches in French/German/English, and those subjects'
-# assignment titles are often written in that language too - so the signal
-# phrases cover common deadline wording in all four. Real examples this list
-# is built against include things like:
-#   "De deadline voor deze opdracht is VRIJDAG 25 SEPTEMBER."
-#   "Frans - ... (date limite : lundi 5/10)"
-#   "English - ... (DEADLINE 05/10)"
+# Phrases signalling a nearby deadline (Dutch/French/German/English).
+# Bare "op"/"voor" are excluded as too common; tests use narrower phrases ("toets op ...").
 SIGNAL_WORDS = re.compile(
     r"(tegen|ten\s+laatste(?:\s+op)?|deadline|uiterlijk(?:\s+(?:op|tegen))?|"
     r"in\s+te\s+dienen(?:\s+tegen|\s+op)?|"
@@ -106,7 +93,7 @@ SIGNAL_WORDS = re.compile(
     r"date\s+limite|à\s+rendre(?:\s+(?:le|pour))?|remettre\s+(?:pour|le)|au\s+plus\s+tard(?:\s+le)?|"
     # German
     r"bis\s+zum|abzugeben|f[äa]llig(?:\s+am)?|sp[äa]testens(?:\s+am)?|abgabetermin\s*:?|"
-    # English (avoid bare "due" alone - "due to" is a common non-deadline phrase)
+    # English (not bare "due": "due to")
     r"due\s*:|due\s+(?:by|on|date)|hand\s+in\s+by|submit\s+by|turn\s+in\s+by|complete\s+by)\b",
     re.IGNORECASE,
 )
@@ -117,10 +104,7 @@ MONTH_NAME_DATE = re.compile(
 )
 WEEKDAY_NAME = re.compile(r"\b(" + "|".join(DUTCH_WEEKDAYS.keys()) + r")\b", re.IGNORECASE)
 
-# How far to look around a signal word for a date - both directions, since
-# teachers write "deadline is FRIDAY 25/9" as often as "FRIDAY 25/9 is the
-# deadline". Generous on purpose: a full sentence like "De deadline voor deze
-# opdracht is VRIJDAG 25 SEPTEMBER" needs real room to find the date at the end.
+# search window around a signal word, both directions (word order varies)
 WINDOW_CHARS = 80
 
 
@@ -130,7 +114,7 @@ def _next_weekday_on_or_after(ref: date, target_weekday: int) -> date:
 
 
 def _resolve_year(ref: date, month: int, day: int) -> date:
-    """Pick the year closest to ref that doesn't put the date more than ~60 days in the past."""
+    """Year closest to ref, at most ~60 days in the past."""
     candidate = date(ref.year, month, day)
     if (ref - candidate).days > 60:
         candidate = date(ref.year + 1, month, day)
@@ -150,7 +134,7 @@ def _find_date_in_snippet(snippet: str, reference_date: date) -> date | None:
                 return date(year, month, day)
             return _resolve_year(reference_date, month, day)
         except ValueError:
-            pass  # fall through to other patterns
+            pass  # try other patterns
 
     m = MONTH_NAME_DATE.search(snippet)
     if m:
@@ -169,16 +153,12 @@ def _find_date_in_snippet(snippet: str, reference_date: date) -> date | None:
 
 
 def extract_due_date(text: str | None, reference_date: date) -> tuple[date | None, bool]:
-    """
-    Returns (due_date, was_inferred_from_text).
-    due_date is None if nothing was found (caller should fall back to reference_date).
-    """
+    """Returns (due_date, was_inferred); due_date is None if nothing found."""
     if not text:
         return None, False
 
     for m in SIGNAL_WORDS.finditer(text):
-        # Look both after AND before the signal word - teachers write both
-        # "deadline is FRIDAY 25/9" and "FRIDAY 25/9 is the deadline".
+        # look before and after the signal word
         after = text[m.end() : m.end() + WINDOW_CHARS]
         found = _find_date_in_snippet(after, reference_date)
         if found:
@@ -194,6 +174,6 @@ def extract_due_date(text: str | None, reference_date: date) -> tuple[date | Non
 
 
 def resolve_due_date(text: str | None, reference_date: date) -> tuple[date, bool]:
-    """Convenience wrapper: always returns a usable date, falling back to reference_date."""
+    """Always returns a date; falls back to reference_date."""
     found, inferred = extract_due_date(text, reference_date)
     return (found, True) if found else (reference_date, False)

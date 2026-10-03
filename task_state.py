@@ -1,8 +1,4 @@
-"""
-Tracks which tasks you've checked off as done. Kept separate from
-data/planner_data.json because that file gets fully overwritten on every
-sync - completion state needs to survive that.
-"""
+"""Checked-off task ids; kept apart from planner_data.json, which every sync overwrites."""
 
 from __future__ import annotations
 
@@ -40,7 +36,7 @@ def set_task_done(root: Path, task_id: str, done: bool) -> set[str]:
     return ids
 
 
-# ---- UI settings (appearance, glass level, reduce motion) ----
+# UI settings
 
 def _settings_path(root: Path) -> Path:
     return root / "data" / "ui_settings.json"
@@ -64,3 +60,52 @@ def set_setting(root: Path, key: str, value) -> dict:
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(settings), encoding="utf-8")
     return settings
+
+
+# pins and notes (keyed by task id)
+
+def _pinned_path(root: Path) -> Path:
+    return root / "data" / "pinned_tasks.json"
+
+
+def _notes_path(root: Path) -> Path:
+    return root / "data" / "task_notes.json"
+
+
+def load_pinned_ids(root: Path) -> list[str]:
+    try:
+        data = json.loads(_pinned_path(root).read_text(encoding="utf-8"))
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
+    ids = [i for i in load_pinned_ids(root) if i != task_id]
+    if pinned:
+        ids.append(task_id)
+    path = _pinned_path(root)
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(ids), encoding="utf-8")
+    return ids
+
+
+def load_notes(root: Path) -> dict[str, str]:
+    try:
+        data = json.loads(_notes_path(root).read_text(encoding="utf-8"))
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def set_note(root: Path, task_id: str, text: str) -> dict[str, str]:
+    notes = load_notes(root)
+    text = (text or "").strip()
+    if text:
+        notes[task_id] = text[:5000]
+    else:
+        notes.pop(task_id, None)
+    path = _notes_path(root)
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(notes, ensure_ascii=False), encoding="utf-8")
+    return notes

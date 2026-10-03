@@ -1,8 +1,5 @@
-"""
-after running this you will find the html in the folder.
-
-this is only for testing really, main app is built via the bat file.
-"""
+"""Builds a read-only dashboard.html from data/planner_data.json (open in a browser).
+Run: python build_dashboard.py"""
 
 from __future__ import annotations
 

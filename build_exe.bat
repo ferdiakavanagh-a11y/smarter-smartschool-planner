@@ -1,7 +1,5 @@
 @echo off
-REM Builds SmartschoolPlanner.exe 
-REM run this once, if changed are made to key files rebuild the exe
-REM See BUILD_EXE.md for the full explanation.
+REM Builds SmartschoolPlanner.exe from desktop_app.py. Rerun after any .py change. See BUILD_EXE.md.
 
 cd /d "%~dp0"
 
@@ -9,20 +7,16 @@ echo Installing/updating PyInstaller...
 pip install pyinstaller --upgrade
 if errorlevel 1 (
     echo.
-    echo ERROR: There was an error and Pyinstaller was not installed please try again.
+    echo ERROR: Could not install or update PyInstaller.
     pause
     exit /b 1
 )
 
 echo.
-echo Building the executable ...
+echo Building SmartschoolPlanner.exe ...
 
-REM The assets folder holds the exe icon (icon.ico) and the window-button images (*.svg).
-REM  - icon.ico becomes the exe's icon (falls back to an icon.ico next to this file)
-REM  - the whole folder is bundled INTO the exe, so the exe needs no loose files for them
-REM An existing .spec file can't take --icon / --add-data on the command line, so when an
-REM assets folder or icon is present we build from the command line (PyInstaller then
-REM writes a fresh .spec that includes them).
+REM assets\ holds icon.ico (exe icon) and the window-button SVGs, bundled into the exe.
+REM An existing .spec can't take --icon/--add-data, so build from the command line (rewrites the .spec).
 set "ICON_FILE=assets\icon.ico"
 if not exist "%ICON_FILE%" if exist "icon.ico" set "ICON_FILE=icon.ico"
 
@@ -53,6 +47,7 @@ if "%USE_SPEC%"=="1" (
         --hidden-import=pydantic ^
         --hidden-import=bs4 ^
         --hidden-import=yaml ^
+        --hidden-import=pyotp ^
         --hidden-import=logprise ^
         --hidden-import=clr ^
         --hidden-import=clr_loader ^
@@ -91,6 +86,7 @@ echo.
 echo ============================================================
 echo Build complete: SmartschoolPlanner.exe is now in this folder.
 echo You can delete the "build" and "dist" folders and the
-echo .spec file if you want to tidy up - they are leftovers.
+echo .spec file if you want to tidy up - they're just build
+echo leftovers, not needed to run the exe.
 echo ============================================================
 pause
