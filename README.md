@@ -5,6 +5,10 @@ Smartschool planner data, figures out the *real* due date even when it's only
 mentioned in an assignment's text rather than the day it was posted, and
 shows it as an interactive, checkable planner with links back to Smartschool.
 
+# code signing policy
+
+   Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org) (pending). See the [code signing policy](CODE_SIGNING_POLICY.md).
+
 ## Install (easiest)
 
 1. Go to the **[Releases](../../releases)** page and download `SmartschoolPlanner-Setup.exe`.
