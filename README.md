@@ -97,8 +97,8 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
   `YYYY-MM-DD` format as you type them in.
 - **First-run setup window** - if `credentials.yml` is missing, the app asks
   for your details and creates it for you.
-- **Automatic first sync** - right after you save your details for the first
-  time, the app syncs once so you don't start on an empty screen.
+- **First sync** - right after you save your details for the first
+  time, at the top right you have to click the sync button once so you don't start on an empty screen.
 
 ## Files
 | File | Purpose |
