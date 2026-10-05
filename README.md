@@ -114,7 +114,6 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `SmartschoolPlanner.iss` | Inno Setup script for the installer |
 | `.github/workflows/release.yml` | Builds the installer on GitHub and attaches it to a release |
 | `credentials.yml.example` | Template - copy to `credentials.yml` and fill in (not needed with the installer) |
-| `debug_verification_question.py` | One-off helper if login asks a security question |
 | `data/planner_data.json` | Raw structured output (created after first sync) |
 | `data/completed_tasks.json` | Your checked-off tasks |
 | `data/pinned_tasks.json` | Your pinned tasks |

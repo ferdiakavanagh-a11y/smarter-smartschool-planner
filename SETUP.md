@@ -47,9 +47,8 @@ same folder, and fill in:
   (e.g. `yourschool.smartschool.be`)
 - `mfa` - only relevant if login asks a security question or you have real
   2FA. If it asks for your birthdate, write it as `YYYY-MM-DD` (e.g.
-  `2008-05-14`). For an authenticator app, put the TOTP secret here. See the
-  comments in the file itself, and `debug_verification_question.py` if you're
-  not sure what to put here.
+  `2008-05-14`). For an authenticator app, put the TOTP secret here. If your
+  account doesn't ask for either, leave it as `REPLACE_ME`.
 - `gemini_api_key` - optional. Leave blank to skip. If set, it's what finds
   deadlines written in the assignment text, which is what makes the real due
   dates show up - get a free key at https://aistudio.google.com/apikey.
@@ -69,9 +68,11 @@ straight away. Click the sync button to log in and fetch fresh data (the very
 first sync runs automatically right after you save your details in the setup
 window). A sync takes a few seconds.
 
-If login fails, most likely cause is `main_url` being wrong, or the security
-question described above - `debug_verification_question.py` helps diagnose
-that safely without guessing.
+If login fails, the usual causes are a wrong username or password, `main_url`
+being wrong (it must not start with `https://`), or the security answer
+(a birthdate must be written as `YYYY-MM-DD`). Fix it in `credentials.yml`
+(or run `python desktop_app.py --setup`) and sync again. Don't retry many
+times with a wrong password, as Smartschool can lock the account for a while.
 
 **Want an actual double-clickable app** (no typing `python desktop_app.py`
 every time)? See [BUILD_EXE.md](BUILD_EXE.md) to build `SmartschoolPlanner.exe`,
