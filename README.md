@@ -5,6 +5,10 @@ Smartschool planner data, figures out the *real* due date even when it's only
 mentioned in an assignment's text rather than the day it was posted, and
 shows it as an interactive, checkable planner with links back to Smartschool.
 
+# code signing policy
+
+   Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org) (pending). See the [code signing policy](CODE_SIGNING_POLICY.md).
+
 ## Install (easiest)
 
 1. Go to the **[Releases](../../releases)** page and download `SmartschoolPlanner-Setup.exe`.
@@ -114,7 +118,6 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `SmartschoolPlanner.iss` | Inno Setup script for the installer |
 | `.github/workflows/release.yml` | Builds the installer on GitHub and attaches it to a release |
 | `credentials.yml.example` | Template - copy to `credentials.yml` and fill in (not needed with the installer) |
-| `debug_verification_question.py` | One-off helper if login asks a security question |
 | `data/planner_data.json` | Raw structured output (created after first sync) |
 | `data/completed_tasks.json` | Your checked-off tasks |
 | `data/pinned_tasks.json` | Your pinned tasks |
