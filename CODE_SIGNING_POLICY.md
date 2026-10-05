@@ -34,13 +34,30 @@ multi-factor authentication, and access is removed when it is no longer needed.
 
 ## Privacy
 
+**Smarter Smartschool Planner does not collect any data.** The developer receives nothing: no
+usage statistics, no analytics, no crash reports, no login details, no assignment data. There is
+no developer server, and the app contains no tracking or telemetry.
+
 This program will not transfer any information to other networked systems unless specifically
 requested by the user or the person installing or operating it.
 
-In practice: login details are stored only on the user's own computer. The app connects to the
-user's own Smartschool address to log in and fetch the planner. If, and only if, the user adds a
-Gemini API key, assignment text is sent to Google's Gemini service to find deadlines. Nothing is
-sent to the developer.
+**Where your data is kept:** everything the app saves is stored in files on your own computer.
+Your login details, planner data, grades, notes, pinned and checked-off tasks and settings are kept
+in the folder the app is installed in, and uninstalling the app removes them. The Smartschool
+login library also keeps a login-session cache (so you don't have to log in on every sync) in the
+`.cache\smartschool` folder of your Windows user profile. That folder also stays on your computer.
+
+**The only places the app connects to, and only because the user asks it to:**
+
+1. **Your own Smartschool address**, to log in and fetch your planner. This is the app's purpose,
+   and your username and password are sent only there.
+2. **Google's Gemini API, only if you add your own Gemini API key.** In that case, the text of your
+   assignments (task title, the "Info voor de leerling" text and the date it was posted) is sent to
+   Google to find deadlines written in the text. Your username, password and school address are
+   not sent. Without a key, nothing is ever sent to Google.
+
+Links you click open in your own web browser. The app does not load fonts, scripts or images from
+the internet.
 
 ## How to verify a download
 
