@@ -24,6 +24,7 @@ from smartschool import (
 from dutch_dates import resolve_due_date
 import gemini_dates
 import planner_details
+import app_errors
 
 # Free regex deadline parser (dutch_dates.py): off, the AI pass replaces it. True = run it first.
 USE_REGEX_DEADLINE_PARSER = False
@@ -146,6 +147,10 @@ _TECHNICAL_LEAF_NAMES = {
 def _is_technical_field(path: str) -> bool:
     last = path.rsplit(".", 1)[-1].split("[")[0].lower()
     return last in _TECHNICAL_LEAF_NAMES
+
+
+# Core fetches that failed during this sync (they are best-effort, but if ALL fail the sync must not look successful)
+_fetch_errors: dict[str, Exception] = {}
 
 
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([.,]\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
@@ -468,6 +473,7 @@ def build_lessons(
             by_date.setdefault(d, []).extend(events)
     except Exception as exc:  # noqa: BLE001 - best effort
         print(f"  (newer planner API fetch failed: {exc})", file=sys.stderr)
+        _fetch_errors["planner"] = exc
 
     days = []
     for d, events in sorted(by_date.items()):
@@ -531,14 +537,15 @@ def build_future_tasks(session: Smartschool, pending: list[dict]) -> tuple[list[
     return days, todos
 
 
-def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> None:
-    """One batched AI call for unresolved items; patches registered dicts in place."""
+def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> dict | None:
+    """One batched AI call for unresolved items; patches registered dicts in place.
+    Returns a warning dict (see app_errors.gemini_warning) if Gemini had a problem, else None."""
     if not pending:
-        return
+        return None
 
     if not gemini_api_key:
         print(f"  ({len(pending)} task(s) had no deadline in the text and no gemini_api_key is set - left on their posted date)")
-        return
+        return None
 
     items = [(p["text"], p["posted"]) for p in pending]
     results, note = gemini_dates.extract_due_dates_batch(
@@ -557,6 +564,11 @@ def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> None:
             entry["due_date"] = result_date.isoformat()
             entry["due_date_corrected"] = True
             entry["due_date_source"] = "ai"
+
+    problem = gemini_dates.last_problem
+    if problem:
+        return app_errors.gemini_warning(problem.get("kind", "other"), problem.get("detail", ""))
+    return None
 
 
 def _num(text) -> float | None:
@@ -631,6 +643,7 @@ def fetch_results(session: Smartschool, max_pages: int = 4) -> tuple[list[dict],
 def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
+    _fetch_errors.clear()
     creds = PathCredentials(str(ROOT / "credentials.yml"))
     session = Smartschool(creds)
     other_info = creds.other_info or {}
@@ -640,8 +653,14 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     try:
         platform_id = session.platform_id
         user_id = session.authenticated_user["id"]
-    except Exception:  # noqa: BLE001 - never block a sync
-        platform_id, user_id = None, None
+    except Exception as exc:  # noqa: BLE001
+        info = app_errors.explain(exc, str(getattr(creds, "main_url", "") or ""))
+        if info["kind"] != "unknown":
+            # wrong login, unreachable school address, Smartschool down...: stop here, tell the user
+            raise app_errors.SyncError(
+                info["kind"], info["title"], info["message"], info["hint"], info["details"]
+            ) from exc
+        platform_id, user_id = None, None  # something odd: carry on, later steps may still work
 
     DATA_DIR.mkdir(exist_ok=True)
     detail_fetcher = planner_details.DetailFetcher(
@@ -673,7 +692,10 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         print(f"  (assignment detail fetch: {detail_fetcher.ok_count} ok, {detail_fetcher.fail_count} failed, route: {detail_fetcher.template or 'none found'})")
 
     print(f"Resolving due dates ({len(pending)} item(s) need a closer look)...")
-    resolve_ai_pending(pending, gemini_api_key)
+    warnings: list[dict] = []
+    ai_warning = resolve_ai_pending(pending, gemini_api_key)
+    if ai_warning:
+        warnings.append(ai_warning)
 
     # due dates final: merge lesson assignments into to-dos, assign ids
     for day in lessons_by_day:
@@ -714,11 +736,27 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         all_classes_by_date = build_all_classes_planner_api(session, start_date, cutoff)
     except Exception as exc:  # noqa: BLE001 - optional tab
         print(f"  (could not fetch the full timetable: {exc})", file=sys.stderr)
+        _fetch_errors["timetable"] = exc
         all_classes_by_date = {}
     all_classes = [
         {"date": d, "events": sorted(events, key=lambda e: e["start"])}
         for d, events in sorted(all_classes_by_date.items())
     ]
+
+    if "planner" in _fetch_errors and "timetable" in _fetch_errors:
+        # Nothing core could be loaded. Don't pretend the sync worked and don't overwrite older data with empties.
+        cause = _fetch_errors["planner"]
+        main_url = str(getattr(creds, "main_url", "") or "")
+        info = app_errors.address_problem(main_url) or app_errors.explain(cause, main_url)
+        if info["kind"] == "unknown":
+            info = {
+                "kind": "login",
+                "title": "Couldn't load your planner",
+                "message": "Smartschool didn't send back any planner data. This usually means the login was refused or Smartschool is having a problem.",
+                "hint": app_errors.LOGIN_HINT + " If your details are right, wait a few minutes: Smartschool may be down.",
+                "details": info["details"],
+            }
+        raise app_errors.SyncError(info["kind"], info["title"], info["message"], info["hint"], info["details"]) from cause
 
     print("Fetching grades...")
     results, results_note = fetch_results(session)
@@ -734,6 +772,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "all_classes": all_classes,
         "results": results,
         "results_note": results_note,
+        "warnings": warnings,
         "diagnostics": {
             "regex_parser_enabled": USE_REGEX_DEADLINE_PARSER,
             "gemini_configured": bool(gemini_api_key),
@@ -753,7 +792,11 @@ def main():
     parser.add_argument("--days-ahead", type=int, default=21, help="How many days ahead to pull the schedule for (default 21)")
     parser.add_argument("--days-back", type=int, default=10, help="How many days back to also pull, in case something was posted late (default 10)")
     args = parser.parse_args()
-    run(days_back=args.days_back, days_ahead=args.days_ahead)
+    try:
+        run(days_back=args.days_back, days_ahead=args.days_ahead)
+    except app_errors.SyncError as exc:
+        print(f"\n{exc.title}: {exc.message}\n{exc.hint}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
