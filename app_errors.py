@@ -104,6 +104,12 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
                         "hint": "Reinstall the latest version of the app.", "details": details}
             return {"kind": "login", "title": "Login failed",
                     "message": "Smartschool didn't accept the login.", "hint": LOGIN_HINT, "details": details}
+        if name == "SmartSchoolJsonError" and "decode" in text.lower():
+            # Smartschool answered with a web page (usually its login page) instead of data
+            return {"kind": "login", "title": "Login failed",
+                    "message": "Smartschool didn't accept the login.",
+                    "hint": LOGIN_HINT + " If your details are right, Smartschool may be having a problem.",
+                    "details": details}
         if isinstance(e, RuntimeError) and "verify and correct these attributes" in text:
             return {"kind": "config", "title": "Login details incomplete",
                     "message": f"Some required login details are empty: {text.split(':', 1)[-1].strip()}.",

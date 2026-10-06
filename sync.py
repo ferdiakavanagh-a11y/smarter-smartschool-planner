@@ -747,7 +747,10 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         # Nothing core could be loaded. Don't pretend the sync worked and don't overwrite older data with empties.
         cause = _fetch_errors["planner"]
         main_url = str(getattr(creds, "main_url", "") or "")
-        info = app_errors.address_problem(main_url) or app_errors.explain(cause, main_url)
+        info = app_errors.address_problem(main_url)
+        if not info:
+            explained = [(app_errors.explain(exc, main_url), exc) for exc in (_fetch_errors["planner"], _fetch_errors["timetable"])]
+            info, cause = next(((i, e) for i, e in explained if i["kind"] != "unknown"), explained[0])
         if info["kind"] == "unknown":
             info = {
                 "kind": "login",

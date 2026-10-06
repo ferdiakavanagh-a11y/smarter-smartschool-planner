@@ -268,6 +268,7 @@ def main():
 
         setup_ui.run_setup(CREDS_FILE)
         return
+    log_error({"kind": "info", "title": "App started", "message": f"folder={ROOT} exe={'yes' if getattr(sys, 'frozen', False) else 'no (python)'}"})
     just_set_up = False
     if "--setup" in sys.argv or not CREDS_FILE.exists():
         import setup_ui  # noqa: PLC0415
