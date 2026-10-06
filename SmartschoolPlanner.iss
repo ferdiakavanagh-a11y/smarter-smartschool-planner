@@ -1,6 +1,6 @@
 ; Inno Setup script. Compile with build_installer.bat (needs Inno Setup 6).
-#define AppName "Smarter Smartschool Planner"
-#define AppExe "SmarterSmartschoolPlanner.exe"
+#define AppName "Smartschool Planner"
+#define AppExe "SmartschoolPlanner.exe"
 #define AppVersion "2.0.1"
 
 [Setup]
