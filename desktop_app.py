@@ -67,6 +67,30 @@ def show_error(window, info: dict) -> None:
         window.load_html(planner_html.render_error(info, task_state.load_settings(ROOT)))
 
 
+_UPDATE_POPUP_JS = r"""(function(){
+if(document.getElementById('upd-banner'))return;
+var o=document.createElement('div');o.id='upd-banner';
+o.style.cssText="position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font:14px/1.45 system-ui,Segoe UI,sans-serif";
+o.innerHTML='<div style="width:min(420px,90vw);padding:22px 24px;border-radius:14px;background:#1f2430;color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.14)">'
++'<div style="font-size:17px;font-weight:700;margin-bottom:8px">Update available</div>'
++'<div id="upd-text" style="margin-bottom:6px"></div>'
++'<div id="upd-ask" style="opacity:.75;margin-bottom:16px">Do you want to update now? The app will restart.</div>'
++'<div id="upd-btns" style="display:flex;gap:10px;justify-content:flex-end">'
++'<button id="upd-no" style="padding:9px 18px;border:1px solid rgba(255,255,255,.28);border-radius:8px;background:transparent;color:#fff;font:inherit;cursor:pointer">No</button>'
++'<button id="upd-yes" style="padding:9px 18px;border:0;border-radius:8px;background:#6c8cff;color:#fff;font:inherit;font-weight:600;cursor:pointer">Yes</button>'
++'</div></div>';
+document.body.appendChild(o);
+var t=document.getElementById('upd-text'),a=document.getElementById('upd-ask'),b=document.getElementById('upd-btns');
+var yes=document.getElementById('upd-yes'),no=document.getElementById('upd-no');
+t.textContent=__TEXT__;
+if(__BUSY__){b.style.display='none';a.style.display='none';}
+yes.onclick=function(){b.style.display='none';a.style.display='none';pywebview.api.install_update();};
+no.onclick=function(){pywebview.api.dismiss_update();o.remove();};
+window.__updStatus=function(x,failed){t.textContent=x;b.style.display=failed?'flex':'none';a.style.display='none';yes.textContent=failed?'Try again':'Yes';no.textContent=failed?'Close':'No';};
+})()
+"""
+
+
 class Api:
     """Methods callable from the page JS. Never store the window as a public attribute
     (pywebview's bridge recurses into it forever); use a leading underscore."""
@@ -219,26 +243,9 @@ class Api:
             time.sleep(2)
 
     def _banner_js(self) -> str:
-        return (
-            "(function(){if(document.getElementById('upd-banner'))return;"
-            "var d=document.createElement('div');d.id='upd-banner';"
-            "d.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;max-width:340px;"
-            "padding:14px 16px;border-radius:12px;background:#1f2430;color:#fff;font:14px/1.4 system-ui,Segoe UI,sans-serif;"
-            "box-shadow:0 8px 28px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14)';"
-            "d.innerHTML='<div id=\"upd-text\" style=\"font-weight:600;margin-bottom:10px\"></div>"
-            "<div id=\"upd-btns\" style=\"display:flex;gap:8px\">"
-            "<button id=\"upd-go\" style=\"flex:1;padding:8px 12px;border:0;border-radius:8px;background:#6c8cff;color:#fff;"
-            "font:inherit;font-weight:600;cursor:pointer\">Update now</button>"
-            "<button id=\"upd-later\" style=\"padding:8px 12px;border:1px solid rgba(255,255,255,.25);border-radius:8px;"
-            "background:transparent;color:#fff;font:inherit;cursor:pointer\">Later</button></div>';"
-            "document.body.appendChild(d);"
-            "var t=document.getElementById('upd-text'),b=document.getElementById('upd-btns');"
-            f"t.textContent={json.dumps(self._update_text)};"
-            f"if({'true' if self._update_busy else 'false'})b.style.display='none';"
-            "document.getElementById('upd-go').onclick=function(){b.style.display='none';pywebview.api.install_update();};"
-            "document.getElementById('upd-later').onclick=function(){pywebview.api.dismiss_update();d.remove();};"
-            "window.__updStatus=function(x,failed){t.textContent=x;b.style.display=failed?'flex':'none';"
-            "document.getElementById('upd-go').textContent=failed?'Try again':'Update now';};})()"
+        # centred pop-up over a dimmed page: "Update now?" Yes / No
+        return _UPDATE_POPUP_JS.replace("__TEXT__", json.dumps(self._update_text)).replace(
+            "__BUSY__", "true" if self._update_busy else "false"
         )
 
     def _banner_status(self, text: str, failed: bool = False) -> None:
