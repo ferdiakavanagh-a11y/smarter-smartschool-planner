@@ -285,6 +285,23 @@ body.searching #searchbar{display:block}
 .retry-btn{padding:13px 28px;border-radius:999px;background:var(--blue);color:#fff;font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px;transition:transform 120ms}
 .retry-btn:active{transform:scale(.96)}
 .retry-btn svg{width:18px;height:18px}
+.error-hint{font-size:14px;color:var(--text-secondary);text-align:center;max-width:340px;line-height:1.4;opacity:.9}
+.error-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+.error-actions .retry-btn{margin:0}
+.retry-btn.secondary{background:rgba(var(--glass-tint-dark),.55);color:var(--text);border:1px solid rgba(128,128,128,.35)}
+.error-details{max-width:360px;width:100%;font-size:12px;color:var(--text-secondary)}
+.error-details summary{cursor:pointer;text-align:center;opacity:.8}
+.error-details pre{margin-top:8px;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-word;text-align:left;padding:10px;border-radius:10px;background:rgba(128,128,128,.15);font-size:11px;user-select:text}
+#warnBar{display:none;margin:0 16px 8px;padding:12px 14px;border-radius:16px;border:1px solid rgba(255,159,10,.45);background:rgba(255,159,10,.14);font-size:13.5px;line-height:1.4;gap:10px;align-items:flex-start}
+#warnBar.show{display:flex}
+#warnBar .warn-ico{width:20px;height:20px;flex:none;color:#ff9f0a;margin-top:1px}
+#warnBar .warn-ico svg{width:100%;height:100%}
+#warnBar .warn-body{flex:1;min-width:0}
+#warnBar .warn-title{font-weight:700}
+#warnBar .warn-hint{opacity:.8;margin-top:2px}
+#warnBar .warn-btns{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+#warnBar button{padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;background:rgba(128,128,128,.22);color:inherit}
+#warnBar .warn-x{flex:none;padding:2px 8px;font-size:18px;line-height:1;background:transparent;opacity:.6}
 
 .detail-block details.raw summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;padding:4px 0 8px;list-style:none}
 details.raw summary::-webkit-details-marker{display:none}
@@ -359,6 +376,7 @@ body.reduce-motion .blob{animation:none}
     <button id="searchClear" aria-label="Clear search"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
   </div>
   <div id="chips"></div>
+  <div id="warnBar" role="status"></div>
   <main id="scroll"></main>
 
   <nav id="tabbar" class="glass">
@@ -510,6 +528,7 @@ function scrollToToday(){
 function render(data, completed, opts){
   opts = opts || {};
   TODAY = isoOffset(0);
+  renderWarnings(data);
   var scroll = document.getElementById("scroll");
   var prev = opts.keepScroll ? scroll.scrollTop : 0;
   document.getElementById("title").textContent = TAB_TITLES[activeTab];
@@ -907,10 +926,42 @@ function showLoading(label){
   document.getElementById("stateContent").innerHTML = '<div class="state-spinner"></div><div style="font-size:17px;font-weight:600">'+esc(label||"Syncing...")+'</div><div class="skeleton-group"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   document.getElementById("state-overlay").classList.add("show");
 }
-function showError(message){
-  document.getElementById("stateContent").innerHTML = '<div class="error-icon">'+ICON.warn+'</div><div class="error-title">Could not sync</div><div class="error-msg">'+esc(message||"Something went wrong while loading your planner.")+'</div><button class="retry-btn" id="retryBtn">'+ICON.retry+' Retry</button>';
+function showError(info){
+  if (typeof info === "string") info = {title:"Could not sync", message:info};
+  info = info || {};
+  var kind = info.kind || "unknown";
+  var canFix = kind === "login" || kind === "config";
+  var h = '<div class="error-icon">'+ICON.warn+'</div><div class="error-title">'+esc(info.title||"Could not sync")+'</div>'
+        + '<div class="error-msg">'+esc(info.message||"Something went wrong while loading your planner.")+'</div>';
+  if (info.hint) h += '<div class="error-hint">'+esc(info.hint)+'</div>';
+  h += '<div class="error-actions">';
+  if (canFix) h += '<button class="retry-btn" id="fixBtn">Change login details</button>';
+  h += '<button class="retry-btn'+(canFix?' secondary':'')+'" id="retryBtn">'+ICON.retry+' Retry</button>';
+  if (DATA && DATA.generated_at) h += '<button class="retry-btn secondary" id="closeErrBtn">Close</button>';
+  h += '</div>';
+  if (info.details) h += '<details class="error-details"><summary>Technical details</summary><pre>'+esc(String(info.details).slice(-2500))+'</pre></details>';
+  document.getElementById("stateContent").innerHTML = h;
   document.getElementById("retryBtn").addEventListener("click", syncNow);
+  var fb = document.getElementById("fixBtn");
+  if (fb) fb.addEventListener("click", function(){ var api = bridge(); if (api && api.open_setup) { showLoading("Waiting for login details..."); api.open_setup(); } });
+  var cb = document.getElementById("closeErrBtn");
+  if (cb) cb.addEventListener("click", hideState);
   document.getElementById("state-overlay").classList.add("show");
+}
+var WARN_DISMISSED = {};
+function renderWarnings(data){
+  var bar = document.getElementById("warnBar"); if (!bar) return;
+  var list = ((data && data.warnings) || []).filter(function(w){ return !WARN_DISMISSED[w.kind]; });
+  if (!list.length) { bar.className = ""; bar.innerHTML = ""; return; }
+  var w = list[0];
+  var h = '<div class="warn-ico">'+ICON.warn+'</div><div class="warn-body"><div class="warn-title">'+esc(w.title||"Heads up")+'</div><div>'+esc(w.message||"")+'</div>';
+  if (w.hint) h += '<div class="warn-hint">'+esc(w.hint)+'</div>';
+  if (w.fix) h += '<div class="warn-btns"><button id="warnFix">Change login details</button></div>';
+  h += '</div><button class="warn-x" id="warnX" aria-label="Dismiss">&times;</button>';
+  bar.innerHTML = h; bar.className = "show";
+  document.getElementById("warnX").addEventListener("click", function(){ WARN_DISMISSED[w.kind] = true; renderWarnings(data); });
+  var f = document.getElementById("warnFix");
+  if (f) f.addEventListener("click", function(){ var api = bridge(); if (api && api.open_setup) { api.open_setup(); } });
 }
 function hideState(){ document.getElementById("state-overlay").classList.remove("show"); }
 
@@ -1047,7 +1098,7 @@ Array.prototype.forEach.call(document.querySelectorAll(".grip"), function(grip){
   }
   applyGlassLevel(currentLevel());
   if (BOOT && BOOT.mode === "loading") { showLoading(BOOT.label); return; }
-  if (BOOT && BOOT.mode === "error") { showError(BOOT.message); return; }
+  if (BOOT && BOOT.mode === "error") { showError(BOOT.error || BOOT.message); return; }
   render(DATA, COMPLETED);
 })();
 </script>
@@ -1128,5 +1179,8 @@ def render_loading(settings: dict | None = None, label: str = "Syncing...") -> s
     return _build(_EMPTY_DATA, [], True, settings, {"mode": "loading", "label": label})
 
 
-def render_error(message: str, settings: dict | None = None) -> str:
-    return _build(_EMPTY_DATA, [], True, settings, {"mode": "error", "message": message})
+def render_error(info, settings: dict | None = None) -> str:
+    """info: a message string, or a dict with kind/title/message/hint/details (see app_errors.explain)."""
+    if isinstance(info, str):
+        info = {"kind": "unknown", "title": "Could not sync", "message": info}
+    return _build(_EMPTY_DATA, [], True, settings, {"mode": "error", "error": info, "message": info.get("message", "")})

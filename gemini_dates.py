@@ -189,6 +189,23 @@ def _is_transient(exc: Exception, code: int | None) -> bool:
     return code is None and any(w in text for w in ("timeout", "timed out", "unavailable", "overloaded", "connection"))
 
 
+# Set by extract_due_dates_batch: None when everything worked, else {"kind", "detail"} so the app can
+# show a clear banner. kinds: key | limit | unavailable | format | other
+last_problem: dict | None = None
+
+
+def _classify_problem(exc: Exception) -> str:
+    code = _error_code(exc)
+    text = f"{type(exc).__name__} {exc}".lower()
+    if isinstance(exc, LimitReached) or code == 429 or "resource_exhausted" in text or "quota" in text:
+        return "limit"
+    if code in (401, 403) or "api key" in text or "api_key" in text or "permission_denied" in text or "unauthenticated" in text:
+        return "key"
+    if _is_transient(exc, code) or isinstance(exc, AllModelsFailed):
+        return "unavailable"
+    return "other"
+
+
 def _generate(
     client,
     prompt: str,
@@ -394,6 +411,8 @@ def extract_due_dates_batch(
     except Exception as exc:  # noqa: BLE001
         return results, f"AI deadline detection couldn't start: {exc}"
 
+    global last_problem
+    last_problem = None
     limiter = UsageLimiter(usage_file)
     keys = list(pending)
     requests_made = 0
@@ -418,18 +437,22 @@ def extract_due_dates_batch(
             models_used.add(model_used)
         except LimitReached as exc:
             problem = f"AI paused ({str(exc)[:300]}) - remaining tasks will be checked on a later sync."
+            last_problem = {"kind": "limit", "detail": str(exc)[:300]}
             break
         except AllModelsFailed as exc:
             problem = f"Every AI model failed ({str(exc)[:400]}) - tasks stay on their posted date and will be retried on the next sync."
+            last_problem = {"kind": _classify_problem(exc), "detail": str(exc)[:400]}
             break
         except Exception as exc:  # noqa: BLE001
             code = _error_code(exc)
             problem = f"AI request failed{f' (HTTP {code})' if code else ''}: {str(exc)[:300]}"
+            last_problem = {"kind": _classify_problem(exc), "detail": f"HTTP {code}: {str(exc)[:300]}" if code else str(exc)[:300]}
             break
 
         parsed = _parse_response(getattr(response, "text", None))
         if parsed is None:
             problem = "AI answered in an unreadable format - nothing was changed."
+            last_problem = {"kind": "format", "detail": "unreadable response"}
             break
         for n, k in enumerate(chunk):
             if n not in parsed:

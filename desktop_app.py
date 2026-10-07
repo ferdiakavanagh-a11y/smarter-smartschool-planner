@@ -25,7 +25,11 @@ ROOT = get_root()
 sys.path.insert(0, str(ROOT))
 
 import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+from datetime import datetime  # noqa: E402
 
+import app_errors  # noqa: E402
 import planner_html  # noqa: E402
 import sync  # noqa: E402
 import task_state  # noqa: E402
@@ -35,6 +39,29 @@ from webview.window import FixPoint  # noqa: E402
 MIN_WIDTH, MIN_HEIGHT = 760, 560
 DATA_FILE = ROOT / "data" / "planner_data.json"
 CREDS_FILE = ROOT / "credentials.yml"
+LOG_FILE = ROOT / "error.log"
+
+
+def log_error(info: dict) -> None:
+    """Keep a local copy of the last problems (error.log next to the app). Never sent anywhere."""
+    try:
+        if LOG_FILE.exists() and LOG_FILE.stat().st_size > 200_000:
+            LOG_FILE.write_text("", encoding="utf-8")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {info.get('kind')}: {info.get('title')} - {info.get('message')}\n")
+            if info.get("details"):
+                f.write(str(info["details"])[-4000:] + "\n")
+            f.write("\n")
+    except Exception:  # noqa: BLE001 - logging must never break the app
+        pass
+
+
+def show_error(window, info: dict) -> None:
+    """Overlay the error on the current page (keeps the last data visible behind it)."""
+    try:
+        window.evaluate_js("showError(" + json.dumps(info) + ")")
+    except Exception:  # noqa: BLE001 - page not ready: fall back to a full error page
+        window.load_html(planner_html.render_error(info, task_state.load_settings(ROOT)))
 
 
 class Api:
@@ -126,6 +153,31 @@ class Api:
         threading.Thread(target=do_sync_and_render, args=(self._window,), daemon=True).start()
         return True
 
+    def open_setup(self):
+        """Open the login-details window (a separate process, so the page stays responsive)."""
+        threading.Thread(target=self._run_setup, daemon=True).start()
+        return True
+
+    def _run_setup(self):
+        before = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--setup-only"]
+        else:
+            cmd = [sys.executable, str(Path(__file__).resolve()), "--setup-only"]
+        env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")  # start a fresh, independent copy
+        try:
+            subprocess.run(cmd, env=env, check=False)
+        except Exception as exc:  # noqa: BLE001
+            log_error({"kind": "config", "title": "Could not open login window", "message": str(exc), "details": traceback.format_exc()})
+        after = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
+        if after != before:
+            do_sync_and_render(self._window)  # new details saved: try again straight away
+        else:
+            try:
+                self._window.evaluate_js("hideState()")
+            except Exception:  # noqa: BLE001
+                pass
+
     def mark_task(self, task_id, done):
         task_state.set_task_done(ROOT, task_id, bool(done))
         return True
@@ -162,13 +214,15 @@ def do_sync_and_render(window):
             window.load_html(planner_html.render_loading(task_state.load_settings(ROOT)))
 
         if not CREDS_FILE.exists():
-            window.load_html(
-                planner_html.render_error(
-                    "No credentials.yml found next to this program. "
-                    "Copy credentials.yml.example to credentials.yml and fill in your "
-                    "Smartschool login details, then click Retry.",
-                    task_state.load_settings(ROOT),
-                )
+            show_error(
+                window,
+                {
+                    "kind": "config",
+                    "title": "Login details missing",
+                    "message": "No saved Smartschool login details were found.",
+                    "hint": "Click Change login details to enter them.",
+                    "details": "",
+                },
             )
             return
 
@@ -179,8 +233,10 @@ def do_sync_and_render(window):
             pinned=task_state.load_pinned_ids(ROOT), notes=task_state.load_notes(ROOT),
         )
         window.load_html(html)
-    except Exception:  # noqa: BLE001 - show error in-window
-        window.load_html(planner_html.render_error(traceback.format_exc(), task_state.load_settings(ROOT)))
+    except Exception as exc:  # noqa: BLE001 - show a friendly error in-window
+        info = app_errors.explain(exc, app_errors.read_main_url(CREDS_FILE))
+        log_error(info)
+        show_error(window, info)
 
 
 def load_cached_html() -> str:
@@ -207,6 +263,12 @@ def load_cached_html() -> str:
 
 
 def main():
+    if "--setup-only" in sys.argv:  # helper mode: just the login-details window, then exit
+        import setup_ui  # noqa: PLC0415
+
+        setup_ui.run_setup(CREDS_FILE)
+        return
+    log_error({"kind": "info", "title": "App started", "message": f"folder={ROOT} exe={'yes' if getattr(sys, 'frozen', False) else 'no (python)'}"})
     just_set_up = False
     if "--setup" in sys.argv or not CREDS_FILE.exists():
         import setup_ui  # noqa: PLC0415
