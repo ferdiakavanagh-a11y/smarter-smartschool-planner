@@ -1,7 +1,9 @@
 ; Inno Setup script. Compile with build_installer.bat (needs Inno Setup 6).
 #define AppName "Smartschool Planner"
 #define AppExe "SmartschoolPlanner.exe"
-#define AppVersion "2.0.2"
+#ifndef AppVersion
+  #define AppVersion "2.0.2"  ; the release workflow passes the real one from version.py
+#endif
 
 [Setup]
 AppId={{B7C1E2A4-5D3F-4E8A-9A61-2F0C8D7E1B55}
@@ -20,6 +22,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
@@ -35,7 +38,7 @@ Name: "{autoprograms}\{#AppName} - Change login details"; Filename: "{app}\{#App
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall
 
 [Code]
 var
