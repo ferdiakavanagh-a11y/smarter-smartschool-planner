@@ -1,7 +1,4 @@
 """Checks GitHub Releases for a newer version and runs its installer silently.
-
-Only the public GitHub API is contacted. No login details, data or identifiers are sent.
-The installer is only run after its SHA-256 matches the checksum published with the release.
 """
 
 from __future__ import annotations
