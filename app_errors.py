@@ -14,6 +14,12 @@ except Exception:  # noqa: BLE001
     requests = None  # type: ignore[assignment]
 
 # What to tell the user to do next, per kind
+ADDRESS_NOT_FOUND_TITLE = "School address not found"
+ADDRESS_HINT = (
+    "Check the school address under Change login details. It should look like "
+    "yourschool.smartschool.be, without https:// or slashes."
+)
+
 LOGIN_HINT = (
     "Check your details, then press Retry. Don't keep retrying with a wrong "
     "password - Smartschool can temporarily lock the account."
@@ -71,6 +77,10 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
                 bad = address_problem(main_url, details)
                 if bad:
                     return bad
+            if isinstance(e, requests.exceptions.TooManyRedirects):
+                return {"kind": "config", "title": ADDRESS_NOT_FOUND_TITLE,
+                        "message": f"Smartschool{where} kept redirecting without ever loading a page.",
+                        "hint": ADDRESS_HINT, "details": details}
             if isinstance(e, requests.exceptions.InvalidURL):
                 return {"kind": "config", "title": "School address looks wrong",
                         "message": "The school address in your login details isn't valid.",
@@ -97,11 +107,41 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
     for e in _chain(exc):
         name = type(e).__name__
         text = str(e)
+        if name in ("SmartSchoolDownloadError", "SmartSchoolJsonError") and getattr(e, "status_code", None):
+            code = e.status_code
+            if code == 404:
+                return {"kind": "config", "title": ADDRESS_NOT_FOUND_TITLE,
+                        "message": f"Smartschool answered \"page not found\" (HTTP 404){where}. "
+                                   "That usually means the school address is wrong.",
+                        "hint": ADDRESS_HINT, "details": details}
+            if code >= 500:
+                return {"kind": "server", "title": "Smartschool has a problem",
+                        "message": f"Smartschool answered with an error (HTTP {code}).",
+                        "hint": "This is on their side. Wait a few minutes and press Retry.",
+                        "details": details}
+            if code in (401, 403):
+                return {"kind": "login", "title": "Smartschool refused the login",
+                        "message": "Smartschool didn't let this account in.", "hint": LOGIN_HINT,
+                        "details": details}
+            if code != 200:
+                return {"kind": "config", "title": "Unexpected answer from Smartschool",
+                        "message": f"Smartschool answered with HTTP {code}{where}.",
+                        "hint": ADDRESS_HINT + " If it is right, wait a few minutes and press Retry.",
+                        "details": details}
+
+    for e in _chain(exc):
+        name = type(e).__name__
+        text = str(e)
         if name == "SmartSchoolAuthenticationError":
             if "pyotp" in text:
                 return {"kind": "config", "title": "2FA component missing",
                         "message": "Your account uses an authenticator app, but the 2FA component isn't available.",
                         "hint": "Reinstall the latest version of the app.", "details": details}
+            if "Max login attempts" in text:
+                return {"kind": "login", "title": "Login failed",
+                        "message": "Smartschool kept sending back the login page, so the login wasn't accepted.",
+                        "hint": LOGIN_HINT + " If your school address is right, check it too.",
+                        "details": details}
             return {"kind": "login", "title": "Login failed",
                     "message": "Smartschool didn't accept the login.", "hint": LOGIN_HINT, "details": details}
         if name == "SmartSchoolJsonError" and "decode" in text.lower():

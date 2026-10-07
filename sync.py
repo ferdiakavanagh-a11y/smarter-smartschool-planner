@@ -397,6 +397,7 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
     base_data = {"from": start_date.isoformat(), "to": cutoff.isoformat()}
 
     raw_elements = None
+    last_exc: Exception | None = None
     # broadest filter first, then the known-working one
     for types_guess in (None, "lessons,planned-assignments,planned-to-dos", "planned-assignments,planned-to-dos"):
         try:
@@ -405,10 +406,13 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
                 data["types"] = types_guess
             raw_elements = session.json(url, data=data)
             break
-        except Exception:  # noqa: BLE001 - next guess
+        except Exception as exc:  # noqa: BLE001 - next guess
+            last_exc = exc
             continue
 
     if raw_elements is None:
+        if last_exc is not None:
+            raise last_exc  # every guess failed: let run() record it
         return {}
 
     by_date: dict[str, list[dict]] = {}
@@ -650,17 +654,40 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     gemini_api_key = other_info.get("gemini_api_key") or None
     detail_url_override = other_info.get("planner_detail_url") or None
 
+    main_url = str(getattr(creds, "main_url", "") or "")
+    bad_address = app_errors.address_problem(main_url)
+    if bad_address:
+        raise app_errors.SyncError(bad_address["kind"], bad_address["title"], bad_address["message"], bad_address["hint"])
+
+    # platform_id is a real request to the school, so it proves the address and login work.
+    platform_id, user_id = None, None
     try:
         platform_id = session.platform_id
+    except (KeyError, IndexError, TypeError):
+        pass  # reached something that answered oddly (e.g. no courses): carry on, the final guard still checks
+    except Exception as exc:  # noqa: BLE001
+        info = app_errors.explain(exc, main_url)
+        if info["kind"] == "unknown":
+            info = {
+                "kind": "network",
+                "title": "Couldn't reach your school",
+                "message": "Smartschool didn't answer the way it should.",
+                "hint": app_errors.ADDRESS_HINT + " Then press Retry.",
+                "details": info["details"],
+            }
+        raise app_errors.SyncError(info["kind"], info["title"], info["message"], info["hint"], info["details"]) from exc
+
+    try:
         user_id = session.authenticated_user["id"]
     except Exception as exc:  # noqa: BLE001
-        info = app_errors.explain(exc, str(getattr(creds, "main_url", "") or ""))
-        if info["kind"] != "unknown":
-            # wrong login, unreachable school address, Smartschool down...: stop here, tell the user
-            raise app_errors.SyncError(
-                info["kind"], info["title"], info["message"], info["hint"], info["details"]
-            ) from exc
-        platform_id, user_id = None, None  # something odd: carry on, later steps may still work
+        if platform_id is None:
+            # nothing verified the school at all: blame the address/login rather than carry on blind
+            info = app_errors.explain(exc, main_url)
+            if info["kind"] != "unknown":
+                raise app_errors.SyncError(
+                    info["kind"], info["title"], info["message"], info["hint"], info["details"]
+                ) from exc
+        # school answered but no user id: carry on, later steps may still work
 
     DATA_DIR.mkdir(exist_ok=True)
     detail_fetcher = planner_details.DetailFetcher(
@@ -743,14 +770,15 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         for d, events in sorted(all_classes_by_date.items())
     ]
 
-    if "planner" in _fetch_errors and "timetable" in _fetch_errors:
+    if "planner" in _fetch_errors and "timetable" in _fetch_errors and not lessons_by_day:
         # Nothing core could be loaded. Don't pretend the sync worked and don't overwrite older data with empties.
         cause = _fetch_errors["planner"]
-        main_url = str(getattr(creds, "main_url", "") or "")
         info = app_errors.address_problem(main_url)
         if not info:
             explained = [(app_errors.explain(exc, main_url), exc) for exc in (_fetch_errors["planner"], _fetch_errors["timetable"])]
             info, cause = next(((i, e) for i, e in explained if i["kind"] != "unknown"), explained[0])
+        if platform_id and info["title"] == app_errors.ADDRESS_NOT_FOUND_TITLE:
+            info = {**info, "kind": "unknown"}  # the school did answer earlier, so don't blame the address
         if info["kind"] == "unknown":
             info = {
                 "kind": "login",
@@ -760,6 +788,15 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
                 "details": info["details"],
             }
         raise app_errors.SyncError(info["kind"], info["title"], info["message"], info["hint"], info["details"]) from cause
+
+    if platform_id is None and not lessons_by_day and not todos and not all_classes:
+        # Never confirmed the school and got nothing back at all: almost always a wrong address.
+        raise app_errors.SyncError(
+            "config",
+            "Couldn't verify the school address",
+            f"Smartschool{' (' + main_url + ')' if main_url else ''} didn't send back any account data.",
+            app_errors.ADDRESS_HINT + " If it is right, check your username and password too.",
+        )
 
     print("Fetching grades...")
     results, results_note = fetch_results(session)
