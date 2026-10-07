@@ -1,7 +1,7 @@
 ; Inno Setup script. Compile with build_installer.bat (needs Inno Setup 6).
 #define AppName "Smartschool Planner"
 #define AppExe "SmartschoolPlanner.exe"
-#define AppVersion "2.0.1"
+#define AppVersion "2.0.2"
 
 [Setup]
 AppId={{B7C1E2A4-5D3F-4E8A-9A61-2F0C8D7E1B55}
