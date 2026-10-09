@@ -130,10 +130,10 @@ def download_and_verify(info: dict, progress=None) -> Path:
 
 
 def launch_installer(path: Path) -> None:
-    """Start the installer silently (it closes this app, replaces the files and relaunches it)."""
+    """Start the installer with no window at all (it closes this app, replaces the files and relaunches it)."""
     env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")  # so the relaunched exe starts fresh
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen(  # noqa: S603
-        [str(path), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+        [str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
         env=env, creationflags=flags, close_fds=True,
     )
