@@ -2,7 +2,7 @@
 #define AppName "Smartschool Planner"
 #define AppExe "SmartschoolPlanner.exe"
 #ifndef AppVersion
-  #define AppVersion "2.0.4"  ; the release workflow passes the real one from version.py
+  #define AppVersion "2.0.2"  ; the release workflow passes the real one from version.py
 #endif
 
 [Setup]
@@ -43,6 +43,15 @@ Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait pos
 [Code]
 var
   CredPage: TInputQueryWizardPage;
+
+function InitializeSetup: Boolean;
+var RC: Integer;
+begin
+  { end the running app first: Inno's own "close applications" step can't, and then rolls back }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExe}', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Sleep(1000);
+  Result := True;
+end;
 
 procedure InitializeWizard;
 begin
