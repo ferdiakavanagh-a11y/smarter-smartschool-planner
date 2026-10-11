@@ -169,9 +169,8 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
             "details": details}
 
 
-# ---------------------------------------------------------------------------------------------
-# Gemini (deadline detection) problems. These never stop a sync; they show as a banner instead.
-# ---------------------------------------------------------------------------------------------
+# deadline detection problems.
+
 
 _AI_TEXT = {
     "key": (
