@@ -70,12 +70,13 @@ transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-ou
 
 #top{position:relative;z-index:5;flex:none;pointer-events:none}
 #top button,#top input,#chips .chip,#searchbar,#warnBar,#titlebar,.header-title-wrap{pointer-events:auto}
-#header{position:relative;padding:14px 20px 10px}
+#header{position:relative;padding:14px 20px 10px;transition:transform var(--dur) var(--ease-out),opacity 200ms var(--ease-out),visibility 0s}
 .header-top{display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;z-index:1}
 .header-title-wrap{display:flex;flex-direction:column;min-width:0}
 .header-title{font-size:34px;font-weight:700;letter-spacing:-.022em;line-height:1.1;transform-origin:left center;transition:transform var(--dur) var(--ease-out),opacity 200ms var(--ease-out);white-space:nowrap}
-#header.scrolled .header-title{transform:translateY(9px) scale(.62);opacity:0}
-#header.scrolled .header-subtitle{opacity:0}
+body:not(.searching) #header.scrolled{transform:translateY(-100%);opacity:0;visibility:hidden;transition-delay:0s,0s,.25s}
+#chips{transition:transform var(--dur) var(--ease-out)}
+body:not(.searching) #top.scrolled #chips{transform:translateY(calc(var(--hdrH,0px) * -1))}
 .header-subtitle{font-size:13px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 200ms var(--ease-out)}
 .header-actions{display:flex;gap:8px;flex-shrink:0}
 .icon-btn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;transition:transform 120ms var(--ease-out)}
@@ -1207,8 +1208,9 @@ document.getElementById("scroll").addEventListener("scroll", function(){
 });
 (function(){
   var tp = document.getElementById("top");
-  function m(){ document.documentElement.style.setProperty("--topH", tp.offsetHeight + "px"); }
-  m(); if (window.ResizeObserver) new ResizeObserver(m).observe(tp); else window.addEventListener("resize", m);
+  var hd0 = document.getElementById("header");
+  function m(){ var r = document.documentElement.style; r.setProperty("--topH", tp.offsetHeight + "px"); r.setProperty("--hdrH", hd0.offsetHeight + "px"); }
+  m(); if (window.ResizeObserver) { var ro = new ResizeObserver(m); ro.observe(tp); ro.observe(hd0); } else window.addEventListener("resize", m);
 })();
 document.addEventListener("visibilitychange", function(){
   document.body.classList.toggle("page-hidden", document.hidden);
