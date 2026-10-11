@@ -23,7 +23,7 @@ TEMPLATE = r'''<!DOCTYPE html>
 --blue:#0A84FF;--orange:#FF9F0A;--purple:#BF5AF2;--red:#FF453A;--green:#30D158;--yellow:#FFD60A;--teal:#64D2FF;--pink:#FF375F;
 --glass-opacity:.55;--glass-blur:26px;--glass-saturate:170%;--glass-specular:.9;
 --glass-tint:255,255,255;--glass-tint-dark:18,18,28;
---gloss:255,255,255;--gloss-border:.25;--gloss-hi:.35;--gloss-hi-sm:.25;
+--gloss:220,230,246;--gloss-border:.17;--gloss-hi:.22;--gloss-hi-sm:.16;
 --glass-inner:rgba(0,0,0,.25);--glass-drop:rgba(0,0,0,.45);--glass-drop-sm:rgba(0,0,0,.35);
 --bg:#000;--bg-elev:#1c1c1e;--separator:rgba(255,255,255,.08);--separator-strong:rgba(255,255,255,.18);
 --text:#fff;--text-secondary:rgba(235,235,245,.6);--text-tertiary:rgba(235,235,245,.3);--fill:rgba(120,120,128,.32);
@@ -36,7 +36,7 @@ TEMPLATE = r'''<!DOCTYPE html>
 --bg:#f2f2f7;--bg-elev:#fff;--separator:rgba(60,60,67,.12);--separator-strong:rgba(60,60,67,.24);
 --text:#000;--text-secondary:rgba(60,60,67,.6);--text-tertiary:rgba(60,60,67,.3);--fill:rgba(120,120,128,.16);
 --glass-tint:255,255,255;--glass-tint-dark:255,255,255;
---gloss-border:.7;--gloss-hi:.9;--gloss-hi-sm:.7;--glass-inner:rgba(0,0,0,.06);--glass-drop:rgba(0,0,0,.18);--glass-drop-sm:rgba(0,0,0,.12);
+--gloss:226,234,248;--gloss-border:.5;--gloss-hi:.45;--gloss-hi-sm:.34;--glass-inner:rgba(0,0,0,.04);--glass-drop:rgba(0,0,0,.12);--glass-drop-sm:rgba(0,0,0,.09);
 }
 
 
@@ -329,12 +329,12 @@ body.reduce-motion *{animation-duration:.01ms !important;transition-duration:.01
 body.reduce-motion .blob{animation:none}
 
 /* CLEAR: cool snow palette, near-transparent glass, sharp specular rim */
-[data-style="clear"]{--blue:#6FB6F2;--orange:#E0B87A;--purple:#A9A4DD;--red:#F0908F;--green:#8ED1A8;--yellow:#E8D68C;--teal:#7FD6EC;--pink:#BFC9DA;--blob4:#BFE3FF;--blob5:#E6F0FF;--bg:#0A1119;--bg-elev:#152031;--text:#F4F8FD;--text-secondary:rgba(228,238,250,.76);--text-tertiary:rgba(228,238,250,.42);--separator:rgba(220,235,255,.12);--separator-strong:rgba(220,235,255,.24);--fill:rgba(170,200,235,.2);--gloss:235,244,255;--gloss-border:.6;--gloss-hi:.8;--gloss-hi-sm:.55;--glass-inner:rgba(200,225,255,.06);--glass-drop:rgba(0,8,20,.32);--glass-drop-sm:rgba(0,8,20,.24)}
+[data-style="clear"]{--blue:#6FB6F2;--orange:#E0B87A;--purple:#A9A4DD;--red:#F0908F;--green:#8ED1A8;--yellow:#E8D68C;--teal:#7FD6EC;--pink:#BFC9DA;--blob4:#BFE3FF;--blob5:#E6F0FF;--bg:#0A1119;--bg-elev:#152031;--text:#F4F8FD;--text-secondary:rgba(228,238,250,.76);--text-tertiary:rgba(228,238,250,.42);--separator:rgba(220,235,255,.12);--separator-strong:rgba(220,235,255,.24);--fill:rgba(170,200,235,.2);--gloss:190,212,240;--gloss-border:.3;--gloss-hi:.3;--gloss-hi-sm:.22;--glass-inner:rgba(200,225,255,.03);--glass-drop:rgba(0,8,20,.32);--glass-drop-sm:rgba(0,8,20,.24)}
 :root[data-scheme="light"][data-style="clear"]{--blue:#2F76B8;--orange:#BC6608;--purple:#5B58A8;--red:#C0392F;--green:#277A4C;--yellow:#86710F;--teal:#1A7897;--pink:#5F7391;--blob4:#CFE6FA;--blob5:#FFFFFF;--bg:#EDF3FA;--bg-elev:#fff;--text:#0B1626;--text-secondary:rgba(18,36,60,.76);--text-tertiary:rgba(18,36,60,.42);--separator:rgba(40,70,110,.14);--separator-strong:rgba(40,70,110,.26);--fill:rgba(60,100,150,.12);--gloss:196,216,244;--gloss-border:.6;--gloss-hi:.5;--gloss-hi-sm:.4;--glass-inner:rgba(80,110,150,.05);--glass-drop:rgba(40,70,110,.09);--glass-drop-sm:rgba(40,70,110,.07)}
 [data-style="clear"] #wallpaper{opacity:1}
 :root[data-scheme="light"][data-style="clear"] #wallpaper{opacity:.7}
 [data-style="clear"] .blob{animation-duration:40s}
-[data-style="clear"] .header-title,[data-style="clear"] .header-subtitle,[data-style="clear"] .section-header{text-shadow:0 1px 10px rgba(0,8,20,.45)}
+[data-style="clear"] .header-title,[data-style="clear"] .header-subtitle,[data-style="clear"] .section-header{text-shadow:0 1px 2px rgba(0,8,20,.35)}
 :root[data-scheme="light"][data-style="clear"] .header-title,:root[data-scheme="light"][data-style="clear"] .header-subtitle,:root[data-scheme="light"][data-style="clear"] .section-header{text-shadow:none}
 body.static-bg .blob{animation:none}
 body.inactive .blob{animation-play-state:paused}
