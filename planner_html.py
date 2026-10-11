@@ -68,8 +68,9 @@ box-shadow:inset 0 1px 1px rgba(var(--gloss),calc(var(--gloss-hi) * var(--glass-
 transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-out),border-color 260ms var(--ease-out);
 }
 
-#header{position:relative;z-index:5;padding:14px 20px 10px;border-bottom:.5px solid transparent;transition:background var(--dur) var(--ease-out),border-color var(--dur) var(--ease-out)}
-#header.scrolled{background:rgba(var(--glass-tint-dark),calc(var(--glass-opacity) + .2));-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));border-bottom-color:var(--separator)}
+#top{position:relative;z-index:5;flex:none;border-bottom:.5px solid transparent;transition:background var(--dur) var(--ease-out),border-color var(--dur) var(--ease-out)}
+#header{position:relative;padding:14px 20px 10px}
+#top.scrolled{background:rgba(var(--glass-tint-dark),calc(var(--glass-opacity) + .32));-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));border-bottom-color:var(--separator)}
 .header-top{display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;z-index:1}
 .header-title-wrap{display:flex;flex-direction:column;min-width:0}
 .header-title{font-size:34px;font-weight:700;letter-spacing:-.022em;line-height:1.1;transform-origin:left center;transition:transform var(--dur) var(--ease-out);white-space:nowrap}
@@ -83,7 +84,7 @@ transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-ou
 .sync-spin{animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-#scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 16px 120px;scroll-behavior:smooth}
+#scroll{flex:1;overflow-y:auto;overflow-x:hidden;margin-top:calc(var(--topH,0px) * -1);padding:calc(6px + var(--topH,0px)) 16px 120px;scroll-padding-top:var(--topH,0px);scroll-behavior:smooth}
 #scroll::-webkit-scrollbar{width:8px}
 #scroll::-webkit-scrollbar-thumb{background:var(--fill);border-radius:8px}
 #scroll::-webkit-scrollbar-track{background:transparent}
@@ -321,7 +322,7 @@ body.maximized .grip{display:none}
 .grip[data-edge=se]{bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize}
 .grip[data-edge=sw]{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize}
 @media (prefers-reduced-motion:reduce){.blob,.skel{animation:none}#scroll{scroll-behavior:auto}*{transition-duration:.01ms !important}#sheet{transition:opacity 200ms linear !important;transform:translate(-50%,0) !important;opacity:0;pointer-events:none}#sheet.show{opacity:1;pointer-events:auto}}
-@media (prefers-reduced-transparency:reduce){.glass,.group,#header.scrolled{-webkit-backdrop-filter:none !important;backdrop-filter:none !important;background:var(--bg-elev) !important}.blob{display:none}}
+@media (prefers-reduced-transparency:reduce){.glass,.group,#top.scrolled{-webkit-backdrop-filter:none !important;backdrop-filter:none !important;background:var(--bg-elev) !important}.blob{display:none}}
 @media (prefers-contrast:more){:root{--text-secondary:var(--text);--separator:var(--separator-strong)}.glass,.group{border-width:1px;border-color:var(--text-secondary)}}
 body.reduce-motion *{animation-duration:.01ms !important;transition-duration:.01ms !important}
 body.reduce-motion .blob{animation:none}
@@ -373,6 +374,7 @@ body.reduce-motion #scroll.tab-in{animation:none}
 <div id="grips"><div class="grip" data-edge="n"></div><div class="grip" data-edge="s"></div><div class="grip" data-edge="e"></div><div class="grip" data-edge="w"></div><div class="grip" data-edge="ne"></div><div class="grip" data-edge="nw"></div><div class="grip" data-edge="se"></div><div class="grip" data-edge="sw"></div></div>
 
 <div id="app">
+  <div id="top">
   <div id="titlebar" class="pywebview-drag-region"></div>
   <header id="header">
     <div class="header-top">
@@ -400,6 +402,7 @@ body.reduce-motion #scroll.tab-in{animation:none}
   </div>
   <div id="chips"></div>
   <div id="warnBar" role="status"></div>
+  </div>
   <main id="scroll"></main>
 
   <nav id="tabbar" class="glass">
@@ -1199,9 +1202,14 @@ document.getElementById("scroll").addEventListener("keydown", function(e){
   else if (t.matches(".task-body,.lesson-body")) { e.preventDefault(); t.closest("[data-detail]").click(); }
 });
 document.getElementById("scroll").addEventListener("scroll", function(){
-  var hd = document.getElementById("header"), on = hd.classList.contains("scrolled"), top = this.scrollTop;
-  if (!on && top > 10) hd.classList.add("scrolled"); else if (on && top < 3) hd.classList.remove("scrolled");
+  var hd = document.getElementById("header"), tp = document.getElementById("top"), on = tp.classList.contains("scrolled"), top = this.scrollTop;
+  if (!on && top > 10) { hd.classList.add("scrolled"); tp.classList.add("scrolled"); } else if (on && top < 3) { hd.classList.remove("scrolled"); tp.classList.remove("scrolled"); }
 });
+(function(){
+  var tp = document.getElementById("top");
+  function m(){ document.documentElement.style.setProperty("--topH", tp.offsetHeight + "px"); }
+  m(); if (window.ResizeObserver) new ResizeObserver(m).observe(tp); else window.addEventListener("resize", m);
+})();
 document.addEventListener("visibilitychange", function(){
   document.body.classList.toggle("page-hidden", document.hidden);
 });
