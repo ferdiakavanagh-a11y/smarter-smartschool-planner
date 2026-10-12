@@ -218,7 +218,7 @@ body.searching #searchbar{display:block}
 .tab:active{transform:scale(.92)}
 .tab.active{color:var(--text)}
 .tab svg{width:24px;height:24px}
-.tab-badge{position:absolute;top:2px;right:calc(50% - 22px);min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:var(--red);color:#fff;font-size:0.75rem;font-weight:700;display:grid;place-items:center;border:2px solid var(--bg)}
+.tab-badge{position:absolute;top:2px;right:calc(50% - 22px);min-width:20px;height:20px;padding:0 4px;line-height:1;border-radius:999px;background:var(--red);color:#fff;font-size:0.75rem;font-weight:700;display:grid;place-items:center;border:2px solid var(--bg)}
 
 #sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:30;opacity:0;pointer-events:none;transition:opacity 280ms var(--ease-out)}
 #sheet-backdrop.show{opacity:1;pointer-events:auto}
@@ -363,7 +363,7 @@ body.reduce-motion #scroll.tab-in{animation:none}
 .icon-btn:active{transform:scale(.88)}
 .seg:not(.active):hover,.btn-secondary:hover,.sheet-close:hover,#toast button:hover{background:color-mix(in srgb,var(--text) 14%,transparent)}
 }
-#tabbar{touch-action:none}
+#tabbar{touch-action:none;background-color:rgba(var(--glass-tint-dark),calc(var(--glass-opacity) + .1))}
 [data-style="clear"] .chip.active{background:var(--blue);color:#04101c}
 :root[data-scheme="light"][data-style="clear"] .chip.active{background:color-mix(in srgb,var(--blue) 82%,#000);color:#fff}
 .no-trans,.no-trans *,.no-trans *::before,.no-trans *::after{transition:none !important}
@@ -379,6 +379,17 @@ html[data-text="l"]{font-size:115%}
 .icon-btn::after{content:attr(aria-label);top:calc(100% + 8px);right:0}
 .busy-col:hover::after,.busy-col:focus-visible::after,.icon-btn:focus-visible::after{opacity:1}
 .busy-col:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
+
+/* ===== LIQUID GLASS LIGHTING: directional specular edges, sheen, rim ring ===== */
+.glass,.group,.chip,.icon-btn{background-image:linear-gradient(155deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,0) 36%,rgba(255,255,255,0) 68%,rgba(255,255,255,.07) 100%)}
+.glass{box-shadow:inset 1.5px 1.5px 1px -1px rgba(var(--gloss),calc(var(--gloss-hi) * var(--glass-specular))),inset -1.5px -1.5px 1px -1px rgba(var(--gloss),calc(var(--gloss-hi) * .45 * var(--glass-specular))),inset 0 0 22px rgba(var(--gloss),.07),inset 0 -1px 2px var(--glass-inner),0 12px 40px var(--glass-drop)}
+.group{box-shadow:inset 1.5px 1.5px 1px -1px rgba(var(--gloss),calc(var(--gloss-hi-sm) * var(--glass-specular))),inset -1.5px -1.5px 1px -1px rgba(var(--gloss),calc(var(--gloss-hi-sm) * .45 * var(--glass-specular))),inset 0 0 18px rgba(var(--gloss),.06),0 8px 30px var(--glass-drop-sm)}
+.chip,.icon-btn{box-shadow:inset 1.5px 1.5px 1px -1px rgba(255,255,255,.7),inset -1px -1px 1px -1px rgba(255,255,255,.35),0 4px 14px rgba(0,0,0,.08)}
+.chip.active{background-image:none;box-shadow:inset 1.5px 1.5px 1px -1px rgba(255,255,255,.55),0 4px 14px rgba(0,0,0,.14)}
+#tabbar .bubble{box-shadow:inset 1.5px 1.5px 1px -1px rgba(255,255,255,.85),inset -1.5px -1.5px 1px -1px rgba(255,255,255,.4),inset 0 0 14px rgba(255,255,255,.1),0 2px 10px rgba(0,0,0,.12)}
+.group::after,#tabbar::after,#sheet::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;opacity:var(--glass-specular);
+ background:conic-gradient(from 200deg at 50% 50%,rgba(var(--gloss),.95),rgba(var(--gloss),0) 55deg,rgba(var(--gloss),0) 140deg,rgba(var(--gloss),.5) 200deg,rgba(var(--gloss),0) 250deg,rgba(var(--gloss),0) 320deg,rgba(var(--gloss),.95) 360deg);
+ -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
 </style>
 </head>
 <body>
@@ -1346,6 +1357,67 @@ Array.prototype.forEach.call(document.querySelectorAll(".grip"), function(grip){
     grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up); grip.addEventListener("pointercancel", up);
   });
 });
+
+/* ===== LIQUID GLASS REFRACTION: the backdrop is bent at the glass edge (SVG displacement map) with slight colour dispersion ===== */
+var LENS = { ok: false, n: 0, cache: {}, seen: null, ro: null, defs: null };
+(function(){
+  try { LENS.ok = !!(window.CSS && CSS.supports && CSS.supports("backdrop-filter", "url(#a)") && window.WeakSet && window.ResizeObserver) && !matchMedia("(prefers-reduced-transparency:reduce)").matches; } catch(e){}
+  if (!LENS.ok) return;
+  var NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.setAttribute("aria-hidden", "true"); svg.style.cssText = "position:absolute;pointer-events:none";
+  LENS.defs = document.createElementNS(NS, "defs"); svg.appendChild(LENS.defs); document.body.appendChild(svg);
+  LENS.seen = new WeakSet();
+  LENS.ro = new ResizeObserver(function(es){ es.forEach(function(e){ lensApply(e.target); }); });
+})();
+function lensMapURL(w, h, r, bezel){
+  var c = document.createElement("canvas"); c.width = w; c.height = h;
+  var x = c.getContext("2d"), img = x.createImageData(w, h), d = img.data, hw = w / 2, hh = h / 2;
+  for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
+    var px = i + .5 - hw, py = j + .5 - hh, qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r);
+    var ox = Math.max(qx, 0), oy = Math.max(qy, 0), depth = -(Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - r), k = (j * w + i) * 4, dx = 0, dy = 0;
+    if (depth > 0 && depth < bezel) {
+      var mag = Math.pow(1 - depth / bezel, 2.2), nx, ny;
+      if (qx > 0 || qy > 0) { nx = (px < 0 ? -ox : ox); ny = (py < 0 ? -oy : oy); var L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L; }
+      else if (qx > qy) { nx = px < 0 ? -1 : 1; ny = 0; } else { nx = 0; ny = py < 0 ? -1 : 1; }
+      dx = -nx * mag; dy = -ny * mag;
+    }
+    d[k] = Math.round(128 + dx * 127); d[k + 1] = Math.round(128 + dy * 127); d[k + 2] = 128; d[k + 3] = 255;
+  }
+  x.putImageData(img, 0, 0); return c.toDataURL();
+}
+function lensFilterId(w, h, r){
+  var bezel = Math.max(6, Math.min(r * .8, 26)), shift = Math.min(12, bezel * .5), key = [w, h, Math.round(r)].join("_");
+  if (LENS.cache[key]) return LENS.cache[key];
+  var id = "lens" + (++LENS.n), cm = { R: "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1", G: "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1", B: "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 0 1" };
+  var f = '<filter xmlns="http://www.w3.org/2000/svg" id="' + id + '" filterUnits="userSpaceOnUse" x="0" y="0" width="' + w + '" height="' + h + '" color-interpolation-filters="sRGB">' +
+    '<feImage href="' + lensMapURL(w, h, r, bezel) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none" result="m"/>';
+  [["a", "R", 1], ["b", "G", .93], ["c", "B", .86]].forEach(function(t){
+    f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2 * t[2]) + '" xChannelSelector="R" yChannelSelector="G" result="d' + t[0] + '"/>' +
+         '<feColorMatrix in="d' + t[0] + '" type="matrix" values="' + cm[t[1]] + '" result="' + t[1] + '"/>';
+  });
+  f += '<feBlend in="R" in2="G" mode="lighten" result="rg"/><feBlend in="rg" in2="B" mode="lighten"/></filter>';
+  var holder = document.createElementNS("http://www.w3.org/2000/svg", "svg"); holder.innerHTML = f;
+  LENS.defs.appendChild(holder.firstChild);
+  LENS.cache[key] = id; return id;
+}
+var LENS_SEL = [["#tabbar", .6], [".chip", .5], [".icon-btn", .45], ["#sheet", .7], ["#tabbar .bubble", .2]];
+function lensApply(el){
+  if (!LENS.ok) return;
+  var w = el.offsetWidth, h = el.offsetHeight; if (w < 24 || h < 24) return;
+  var r = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, w / 2, h / 2), id = lensFilterId(w, h, r), k = id + "|" + el.__lf;
+  if (el.__lk === k) return; el.__lk = k;
+  var v = "url(#" + id + ") blur(calc(var(--glass-blur) * " + el.__lf + ")) saturate(var(--glass-saturate))";
+  el.style.backdropFilter = v; el.style.webkitBackdropFilter = v;
+}
+function lensScan(){
+  if (!LENS.ok) return;
+  LENS_SEL.forEach(function(p){
+    var list = document.querySelectorAll(p[0]);
+    for (var i = 0; i < list.length; i++) { var el = list[i]; el.__lf = p[1]; lensApply(el); if (!LENS.seen.has(el)) { LENS.seen.add(el); LENS.ro.observe(el); } }
+  });
+}
+var _renderLens = render; render = function(){ var r = _renderLens.apply(this, arguments); lensScan(); return r; };
+lensScan();
 
 /* ===== INIT ===== */
 (function(){
