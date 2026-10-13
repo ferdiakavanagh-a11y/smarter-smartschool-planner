@@ -490,7 +490,7 @@ var NOTES = __NOTES_JSON__;
 var PLATFORM_ID = DATA.platform_id, USER_ID = DATA.user_id;
 DATA.todos = DATA.todos || []; DATA.days = DATA.days || []; DATA.all_classes = DATA.all_classes || [];
 function bridge(){ return (EMBEDDED && window.pywebview && window.pywebview.api) ? window.pywebview.api : null; }
-function syncNow(){ var api = bridge(); if (!api) return; showLoading(); api.sync_now(); }
+function syncNow(){ var api = bridge(); if (!api || (BOOT && BOOT.chooseRendering)) return; showLoading(); api.sync_now(); }
 function markTask(id, done){
   var i = COMPLETED.indexOf(id);
   if (done && i === -1) COMPLETED.push(id);
@@ -1057,6 +1057,7 @@ function finishClose(){
 /* ===== UPDATE NOTICES: shared detail/settings sheet ===== */
 function closeSheetNotice(){
   if (!sheetNotice) return true;
+  if (sheetNotice.kind === 'rendering') return false;
   if (sheetNotice.busy || noticeClosing) return false;
   var notice = sheetNotice, api = bridge();
   if (notice.kind === "update") {
@@ -1075,7 +1076,7 @@ function closeSheetNotice(){
   return false;
 }
 function canShowNotice(){
-  return (!EMBEDDED || bridge()) && !sheetEl.classList.contains("show") && !document.getElementById("state-overlay").classList.contains("show");
+  return !(BOOT && BOOT.chooseRendering) && (!EMBEDDED || bridge()) && !sheetEl.classList.contains("show") && !document.getElementById("state-overlay").classList.contains("show");
 }
 function showUpdatePrompt(info){
   if (sheetNotice && sheetNotice.kind !== "update") return false;
@@ -1142,10 +1143,56 @@ document.getElementById("toastUndo").addEventListener("click", function(){ var f
 
 /* ===== SETTINGS ===== */
 function currentLevel(){ var l = loadSetting("glassLevel"); return l==null ? 1 : l; }
+function renderingMode(){ return loadSetting("renderingMode") === "performance" ? "performance" : "fancy"; }
+function renderingOptions(unselected){
+  return '<div class="seg-control">'+["performance","fancy"].map(function(m){
+    var active = !unselected && renderingMode() === m;
+    return '<button class="seg'+(active?' active':'')+'" data-rendering-opt="'+m+'" aria-pressed="'+active+'">'+(m==="performance"?'Performance':'Fancy')+'</button>';
+  }).join('')+'</div><div class="detail-desc" style="padding:12px 16px">Performance: simpler glass refraction for weaker systems.<br>Fancy: full glass refraction with subtle color dispersion.</div>';
+}
+function setRenderingMode(mode){
+  if (mode !== "performance" && mode !== "fancy") return;
+  var buttons = document.querySelectorAll('[data-rendering-opt]'), status = document.getElementById('renderingStatus');
+  buttons.forEach(function(b){ b.disabled = true; });
+  if (status) status.textContent = '';
+  var failed = function(){
+    buttons.forEach(function(b){ b.disabled = false; });
+    if (status) status.textContent = 'Could not save your choice. Please try again.';
+  };
+  try {
+    var api = bridge(), saved;
+    if (EMBEDDED) { if (!api) { failed(); return; } saved = api.save_setting('renderingMode', mode); }
+    else { var next = Object.assign({}, SETTINGS, {renderingMode:mode}); localStorage.setItem('planner.settings', JSON.stringify(next)); saved = true; }
+    Promise.resolve(saved).then(function(ok){
+      if (!ok) { failed(); return; }
+      SETTINGS.renderingMode = mode;
+      if (LENS.ok) {
+        LENS.defs.textContent = ''; LENS.cache = {};
+        LENS.seen.forEach(function(el){ el.__lk = null; });
+        lensScan();
+      }
+      buttons.forEach(function(b){ var active = b.dataset.renderingOpt === mode; b.disabled = false; b.classList.toggle('active', active); b.setAttribute('aria-pressed', active); });
+      if (BOOT && BOOT.chooseRendering) {
+        BOOT.chooseRendering = false; sheetNotice = null;
+        document.getElementById('sheetClose').disabled = false;
+        document.getElementById('sheetClose').style.display = '';
+        hideSheet(); syncNow();
+      }
+    }, failed);
+  } catch(e){ failed(); }
+}
+function showRenderingChoice(){
+  if (!BOOT || !BOOT.chooseRendering || !bridge() || sheetEl.classList.contains('show')) return;
+  showSheet('Choose your rendering mode', '<div class="detail-list">'+renderingOptions(true)+'</div><div class="detail-block"><p>You can always change this in Settings.</p><p id="renderingStatus" role="status" aria-live="polite"></p></div>');
+  sheetNotice = {kind:'rendering'};
+  document.getElementById('sheetClose').disabled = true;
+  document.getElementById('sheetClose').style.display = 'none';
+}
 
 function openSettings(){
   var st = document.documentElement.getAttribute("data-style") || "vivid";
   var body =
+    '<div class="setting-group"><h4>Rendering</h4><div class="detail-list">'+renderingOptions()+'</div><p id="renderingStatus" role="status" aria-live="polite"></p></div>'+
     '<div class="setting-group"><h4>Theme</h4><div class="detail-list"><div class="seg-control">'+
       '<button class="seg'+(st==="vivid"?" active":"")+'" data-style-opt="vivid">Vivid</button>'+
       '<button class="seg'+(st==="clear"?" active":"")+'" data-style-opt="clear">Clear</button></div></div></div>'+
@@ -1394,6 +1441,7 @@ document.getElementById("sheetBody").addEventListener("click", function(e){
   }
   if (e.target.closest("[data-external]")) { openSmartschool(); return; }
   var so = e.target.closest("[data-style-opt]"); if (so) { setStyle(so.dataset.styleOpt); return; }
+  var rm = e.target.closest("[data-rendering-opt]"); if (rm) { setRenderingMode(rm.dataset.renderingOpt); return; }
   var sm = e.target.closest("[data-scheme-opt]"); if (sm) { setScheme(sm.dataset.schemeOpt); return; }
   var tx = e.target.closest("[data-text-opt]"); if (tx) { setTextSize(tx.dataset.textOpt); return; }
   var td = e.target.closest("[data-detail='task']"); if (td) { openTask(td.dataset.id); }
@@ -1499,11 +1547,15 @@ function lensFilterId(w, h, r){
   var id = "lens" + (++LENS.n), cm = { R: "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1", G: "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1", B: "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 0 1" };
   var f = '<filter xmlns="http://www.w3.org/2000/svg" id="' + id + '" filterUnits="userSpaceOnUse" x="0" y="0" width="' + w + '" height="' + h + '" color-interpolation-filters="sRGB">' +
     '<feImage href="' + lensMapURL(w, h, r, bezel) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none" result="m"/>';
-  [["a", "R", 1], ["b", "G", .93], ["c", "B", .86]].forEach(function(t){
-    f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2 * t[2]) + '" xChannelSelector="R" yChannelSelector="G" result="d' + t[0] + '"/>' +
-         '<feColorMatrix in="d' + t[0] + '" type="matrix" values="' + cm[t[1]] + '" result="' + t[1] + '"/>';
-  });
-  f += '<feBlend in="R" in2="G" mode="lighten" result="rg"/><feBlend in="rg" in2="B" mode="lighten"/></filter>';
+  if (renderingMode() === 'performance') {
+    f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2) + '" xChannelSelector="R" yChannelSelector="G"/></filter>';
+  } else {
+    [["a", "R", 1], ["b", "G", .93], ["c", "B", .86]].forEach(function(t){
+      f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2 * t[2]) + '" xChannelSelector="R" yChannelSelector="G" result="d' + t[0] + '"/>' +
+           '<feColorMatrix in="d' + t[0] + '" type="matrix" values="' + cm[t[1]] + '" result="' + t[1] + '"/>';
+    });
+    f += '<feBlend in="R" in2="G" mode="lighten" result="rg"/><feBlend in="rg" in2="B" mode="lighten"/></filter>';
+  }
   var holder = document.createElementNS("http://www.w3.org/2000/svg", "svg"); holder.innerHTML = f;
   LENS.defs.appendChild(holder.firstChild);
   LENS.cache[key] = id; return id;
@@ -1577,6 +1629,8 @@ lensScan();
   if (BOOT && BOOT.mode === "loading") { showLoading(BOOT.label); return; }
   if (BOOT && BOOT.mode === "error") { showError(BOOT.error || BOOT.message); return; }
   render(DATA, COMPLETED);
+  showRenderingChoice();
+  window.addEventListener('pywebviewready', showRenderingChoice);
 })();
 </script>
 </body>
@@ -1653,8 +1707,9 @@ def render_html(
     settings: dict | None = None,
     pinned=None,
     notes: dict | None = None,
+    choose_rendering: bool = False,
 ) -> str:
-    return _build(data, completed_ids, embedded, settings, None, pinned, notes)
+    return _build(data, completed_ids, embedded, settings, {"chooseRendering": True} if choose_rendering else None, pinned, notes)
 
 
 def render_loading(settings: dict | None = None, label: str = "Syncing...") -> str:

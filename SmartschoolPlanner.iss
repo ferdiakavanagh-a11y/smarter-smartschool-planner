@@ -182,6 +182,21 @@ var
 begin
   if CurStep = ssInstall then
     WasUpgrade := FileExists(ExpandConstant('{app}\{#AppExe}'));
+  if CurStep = ssPostInstall then
+  begin
+    if WasUpgrade then
+    begin
+      if FileExists(ExpandConstant('{app}\data\rendering_choice_pending')) and
+         (not DeleteFile(ExpandConstant('{app}\data\rendering_choice_pending'))) then
+        RaiseException('Could not clear the first-start rendering choice.');
+    end
+    else
+    begin
+      ForceDirectories(ExpandConstant('{app}\data'));
+      if not SaveStringToFile(ExpandConstant('{app}\data\rendering_choice_pending'), 'pending', False) then
+        RaiseException('Could not save the first-start rendering choice.');
+    end;
+  end;
   if (CurStep = ssPostInstall) and (not FileExists(CredFile)) then
   begin
     Mfa := NormalizeSecurity(CredPage.Values[3], Bad);

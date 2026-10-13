@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 
@@ -54,12 +56,26 @@ def load_settings(root: Path) -> dict:
 
 
 def set_setting(root: Path, key: str, value) -> dict:
+    if key == "renderingMode" and value not in ("performance", "fancy"):
+        raise ValueError("Unknown rendering mode")
     settings = load_settings(root)
     settings[key] = value
     path = _settings_path(root)
     path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(settings), encoding="utf-8")
+    # A failed write must not destroy previously saved appearance preferences.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as file:
+        temporary = Path(file.name)
+        try:
+            file.write(json.dumps(settings))
+            file.close()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return settings
+
+
+def rendering_choice_pending(root: Path) -> bool:
+    return (root / "data" / "rendering_choice_pending").exists()
 
 
 # pins and notes (keyed by task id)

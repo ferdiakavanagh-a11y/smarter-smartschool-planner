@@ -82,6 +82,7 @@ class Api:
         self._release_notes = None
         self._closed = threading.Event()
         self._update_lock = threading.Lock()
+        self._settings_lock = threading.Lock()
 
     # window controls
     def win_close(self):
@@ -161,6 +162,8 @@ class Api:
             self._set_maximized(False)
 
     def sync_now(self):
+        if task_state.rendering_choice_pending(ROOT):
+            return False
         threading.Thread(target=do_sync_and_render, args=(self._window,), daemon=True).start()
         return True
 
@@ -308,7 +311,14 @@ class Api:
         return True
 
     def save_setting(self, key, value):
-        task_state.set_setting(ROOT, str(key), value)
+        key = str(key)
+        try:
+            with self._settings_lock:
+                task_state.set_setting(ROOT, key, value)
+                if key == "renderingMode":
+                    (ROOT / "data" / "rendering_choice_pending").unlink(missing_ok=True)
+        except (OSError, ValueError):
+            return False
         return True
 
 
@@ -352,6 +362,7 @@ def do_sync_and_render(window):
 def load_cached_html() -> str:
     """HTML for the last saved data, or an empty 'Not synced yet' page. Never syncs."""
     settings = task_state.load_settings(ROOT)
+    choose_rendering = task_state.rendering_choice_pending(ROOT) and "--updated" not in sys.argv
     if DATA_FILE.exists():
         try:
             data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
@@ -360,6 +371,7 @@ def load_cached_html() -> str:
             return planner_html.render_html(
                 data, completed, embedded=True, settings=settings,
                 pinned=task_state.load_pinned_ids(ROOT), notes=task_state.load_notes(ROOT),
+                choose_rendering=choose_rendering,
             )
         except Exception as exc:  # noqa: BLE001 - treat as missing
             print(f"Startup: couldn't use {DATA_FILE} ({exc}).")
@@ -369,6 +381,7 @@ def load_cached_html() -> str:
     return planner_html.render_html(
         empty, [], embedded=True, settings=settings,
         pinned=task_state.load_pinned_ids(ROOT), notes=task_state.load_notes(ROOT),
+        choose_rendering=choose_rendering,
     )
 
 
@@ -380,6 +393,8 @@ def main():
         return
     log_error({"kind": "info", "title": "App started", "message": f"version={__version__} folder={ROOT} exe={'yes' if getattr(sys, 'frozen', False) else 'no (python)'}"})
     just_set_up = False
+    if "--updated" in sys.argv:
+        (ROOT / "data" / "rendering_choice_pending").unlink(missing_ok=True)
     if "--setup" in sys.argv or not CREDS_FILE.exists():
         import setup_ui  # noqa: PLC0415
 
@@ -406,7 +421,7 @@ def main():
     window.events.closed += api._on_closed
     window.events.maximized += api._on_maximized
     window.events.restored += api._on_restored
-    if just_set_up:
+    if just_set_up and not task_state.rendering_choice_pending(ROOT):
         window.events.shown += api.sync_now  # first sync right after saving credentials
     webview.start()
 
