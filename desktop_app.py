@@ -36,7 +36,7 @@ import sync  # noqa: E402
 import task_state  # noqa: E402
 import updater  # noqa: E402
 import webview  # noqa: E402
-from version import __version__  # noqa: E402
+from version import __version__, RELEASE_NOTES  # noqa: E402
 from webview.window import FixPoint  # noqa: E402
 
 MIN_WIDTH, MIN_HEIGHT = 760, 560
@@ -67,30 +67,6 @@ def show_error(window, info: dict) -> None:
         window.load_html(planner_html.render_error(info, task_state.load_settings(ROOT)))
 
 
-_UPDATE_POPUP_JS = r"""(function(){
-if(document.getElementById('upd-banner'))return;
-var o=document.createElement('div');o.id='upd-banner';
-o.style.cssText="position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font:14px/1.45 system-ui,Segoe UI,sans-serif";
-o.innerHTML='<div style="width:min(420px,90vw);padding:22px 24px;border-radius:14px;background:#1f2430;color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.14)">'
-+'<div style="font-size:17px;font-weight:700;margin-bottom:8px">Update available</div>'
-+'<div id="upd-text" style="margin-bottom:6px"></div>'
-+'<div id="upd-ask" style="opacity:.75;margin-bottom:16px">Do you want to update now? The app will restart.</div>'
-+'<div id="upd-btns" style="display:flex;gap:10px;justify-content:flex-end">'
-+'<button id="upd-no" style="padding:9px 18px;border:1px solid rgba(255,255,255,.28);border-radius:8px;background:transparent;color:#fff;font:inherit;cursor:pointer">No</button>'
-+'<button id="upd-yes" style="padding:9px 18px;border:0;border-radius:8px;background:#6c8cff;color:#fff;font:inherit;font-weight:600;cursor:pointer">Yes</button>'
-+'</div></div>';
-document.body.appendChild(o);
-var t=document.getElementById('upd-text'),a=document.getElementById('upd-ask'),b=document.getElementById('upd-btns');
-var yes=document.getElementById('upd-yes'),no=document.getElementById('upd-no');
-t.textContent=__TEXT__;
-if(__BUSY__){b.style.display='none';a.style.display='none';}
-yes.onclick=function(){b.style.display='none';a.style.display='none';pywebview.api.install_update();};
-no.onclick=function(){pywebview.api.dismiss_update();o.remove();};
-window.__updStatus=function(x,failed){t.textContent=x;b.style.display=failed?'flex':'none';a.style.display='none';yes.textContent=failed?'Try again':'Yes';no.textContent=failed?'Close':'No';};
-})()
-"""
-
-
 class Api:
     """Methods callable from the page JS. Never store the window as a public attribute
     (pywebview's bridge recurses into it forever); use a leading underscore."""
@@ -102,6 +78,10 @@ class Api:
         self._update_dismissed = False
         self._update_busy = False
         self._update_text = ""
+        self._update_failed = False
+        self._release_notes = None
+        self._closed = threading.Event()
+        self._update_lock = threading.Lock()
 
     # window controls
     def win_close(self):
@@ -214,6 +194,20 @@ class Api:
         threading.Thread(target=self._do_update, daemon=True).start()
         return True
 
+    def acknowledge_update(self, version):
+        if str(version) != __version__ or not self._release_notes:
+            return False
+        try:
+            if not updater.dismiss_update_notice(ROOT, __version__):
+                return False
+        except OSError:
+            return False
+        self._release_notes = None
+        return True
+
+    def _on_closed(self):
+        self._closed.set()
+
     def dismiss_update(self):
         self._update_dismissed = True
         return True
@@ -222,6 +216,22 @@ class Api:
         threading.Thread(target=self._check_for_update, daemon=True).start()
 
     def _check_for_update(self):
+        if "--updated" in sys.argv:
+            try:
+                updater.prepare_installed_notice(ROOT, __version__, RELEASE_NOTES)
+            except OSError:
+                pass  # a notice must never prevent the app from opening
+        self._release_notes = updater.load_update_notice(ROOT, __version__)
+        if self._release_notes and not self._release_notes["notes"]:
+            self._release_notes["notes"] = RELEASE_NOTES
+        while self._release_notes and not self._closed.is_set():
+            try:
+                self._window.evaluate_js("showReleaseNotes(" + json.dumps(self._release_notes) + ")")
+            except Exception:  # noqa: BLE001 - page/bridge not ready; retry after loading
+                pass
+            self._closed.wait(2)
+        if self._closed.is_set():
+            return
         if not getattr(sys, "frozen", False) and not os.environ.get("SSP_UPDATE_TEST"):
             return  # only the installed exe updates itself
         try:
@@ -234,31 +244,29 @@ class Api:
         self._update = info
         self._update_text = f"Version {info['version']} is available (you have {__version__})."
         log_error({"kind": "info", "title": "Update available", "message": info["version"], "details": ""})
-        while not self._update_dismissed:  # re-add the banner whenever the page gets reloaded
+        while not self._update_dismissed and not self._closed.is_set():
             try:
-                if not self._window.evaluate_js("!!document.getElementById('upd-banner')"):
-                    self._window.evaluate_js(self._banner_js())
+                self._window.evaluate_js(self._banner_js())
             except Exception:  # noqa: BLE001 - page mid-load
                 pass
-            time.sleep(2)
+            self._closed.wait(2)
 
     def _banner_js(self) -> str:
-        # centred pop-up over a dimmed page: "Update now?" Yes / No
-        return _UPDATE_POPUP_JS.replace("__TEXT__", json.dumps(self._update_text)).replace(
-            "__BUSY__", "true" if self._update_busy else "false"
-        )
+        return "showUpdatePrompt(" + json.dumps({"text": self._update_text, "busy": self._update_busy, "failed": self._update_failed}) + ")"
 
     def _banner_status(self, text: str, failed: bool = False) -> None:
         self._update_text = text
+        self._update_failed = failed
         try:
-            self._window.evaluate_js(f"window.__updStatus&&window.__updStatus({json.dumps(text)},{'true' if failed else 'false'})")
+            self._window.evaluate_js(self._banner_js())
         except Exception:  # noqa: BLE001
             pass
 
     def _do_update(self):
-        if not self._update or self._update_busy:
-            return
-        self._update_busy = True
+        with self._update_lock:
+            if not self._update or self._update_busy:
+                return
+            self._update_busy = True
         try:
             self._banner_status("Downloading update...")
             last = [-1]
@@ -270,6 +278,7 @@ class Api:
                     self._banner_status(f"Downloading update... {pct}%")
 
             path = updater.download_and_verify(self._update, progress)
+            updater.save_update_notice(ROOT, self._update)
             self._banner_status("Installing... the app will restart.")
             updater.launch_installer(path)
             time.sleep(1.5)
@@ -394,6 +403,7 @@ def main():
     api._window = window
     window.events.shown += api._tune_window
     window.events.shown += api._start_update_check
+    window.events.closed += api._on_closed
     window.events.maximized += api._on_maximized
     window.events.restored += api._on_restored
     if just_set_up:

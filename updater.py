@@ -28,7 +28,7 @@ class UpdateError(Exception):
 
 
 def parse_version(text: str) -> tuple[int, ...] | None:
-    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)", (text or "").strip())
+    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", (text or "").strip())
     return tuple(int(p) for p in m.group(1).split(".")) if m else None
 
 
@@ -63,8 +63,10 @@ def check_for_update(current_version: str) -> dict | None:
         data = json.loads(resp.read().decode("utf-8"))
     if data.get("draft") or data.get("prerelease"):
         return None
-    latest, current = parse_version(data.get("tag_name", "")), parse_version(current_version)
-    if latest is None or current is None or not is_newer(latest, current):
+    tag = str(data.get("tag_name") or "")
+    latest, current = parse_version(tag), parse_version(current_version)
+    stable_over_beta = latest == current and "-" in current_version.split("+", 1)[0] and "-" not in tag.split("+", 1)[0]
+    if latest is None or current is None or not (is_newer(latest, current) or stable_over_beta):
         return None
     assets = {a.get("name"): a for a in data.get("assets", [])}
     installer = assets.get(INSTALLER_NAME)
@@ -80,7 +82,50 @@ def check_for_update(current_version: str) -> dict | None:
         "digest": digest.split(":", 1)[1].lower() if digest.lower().startswith("sha256:") else None,
         "size": installer.get("size"),
         "page": data.get("html_url"),
+        "notes": str(data.get("body") or "")[:100_000],
     }
+
+
+def save_update_notice(root: Path, info: dict) -> None:
+    """Persist public release notes before the installer can close the running app."""
+    path = root / "data" / "update_notice.json"
+    path.parent.mkdir(exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"version": info["version"], "notes": str(info.get("notes") or "")[:100_000]}, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _read_update_notice(root: Path) -> dict | None:
+    try:
+        notice = json.loads((root / "data" / "update_notice.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return notice if isinstance(notice, dict) else None
+
+
+def prepare_installed_notice(root: Path, version: str, notes: str) -> None:
+    """Also cover upgrades launched by older updaters that didn't save release notes."""
+    notice = _read_update_notice(root)
+    if not notice or notice.get("version") != version:
+        save_update_notice(root, {"version": version, "notes": notes})
+
+
+def load_update_notice(root: Path, version: str) -> dict | None:
+    notice = _read_update_notice(root)
+    if not notice or notice.get("version") != version or notice.get("dismissed"):
+        return None  # failed install or another version: do not announce an update that didn't happen
+    return {"version": version, "notes": str(notice.get("notes") or "")[:100_000]}
+
+
+def dismiss_update_notice(root: Path, version: str) -> bool:
+    notice = _read_update_notice(root)
+    if not notice or notice.get("version") != version:
+        return False
+    path = root / "data" / "update_notice.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"version": version, "dismissed": True}), encoding="utf-8")
+    temporary.replace(path)
+    return True
 
 
 def _expected_hash(info: dict) -> str:

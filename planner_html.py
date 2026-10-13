@@ -135,6 +135,10 @@ transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-ou
 .task-desc{font-size:0.9375rem;line-height:1.35;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .task-info{font-size:0.8125rem;letter-spacing:.005em;line-height:1.35;color:var(--text-secondary);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}
 .detail-info{font-size:1rem;line-height:1.45;white-space:pre-wrap;padding:14px;border-radius:var(--radius-row);background:color-mix(in srgb,var(--text) 5%,transparent)}
+.release-notes{font-size:1rem;line-height:1.45;overflow-wrap:anywhere}
+.release-notes p,.release-notes ul{margin-bottom:12px}
+.release-notes ul{padding-left:22px}
+.release-notes h4{margin-top:16px}
 .today-tag{font-size:0.75rem;font-weight:600;padding:2px 8px;border-radius:999px;margin-left:8px;vertical-align:middle;background:color-mix(in srgb,var(--blue) 22%,transparent);color:var(--blue)}
 .task-row .task-body{padding-right:26px}
 .task-pin{position:absolute;top:10px;right:10px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--text-tertiary);opacity:0;transition:opacity 150ms,color 150ms,transform 120ms}
@@ -938,6 +942,7 @@ function openLesson(mid){
 
 var sheetEl = document.getElementById("sheet"), scrimEl = document.getElementById("sheet-backdrop");
 var INERT_IDS = ["header","chips","searchbar","warnBar","scroll","tabbar"], sheetRet = null, sheetAnim = 0, sheetY = 0, sheetH = 1;
+var sheetNotice = null, noticeClosing = false;
 function setInert(on){ INERT_IDS.forEach(function(id){ var el = document.getElementById(id); if (!el) return; if (on) el.setAttribute("inert",""); else el.removeAttribute("inert"); }); }
 function sheetResetStyles(){
   cancelAnimationFrame(sheetAnim);
@@ -965,6 +970,7 @@ function showSheet(title, body, link, reuse){
   return rebuilt;
 }
 function hideSheet(){
+  if (!closeSheetNotice()) return;
   flushNote();
   if (!sheetEl.classList.contains("show")) return;
   cancelAnimationFrame(sheetAnim);
@@ -975,6 +981,7 @@ function hideSheet(){
   setInert(false); restoreFocus();
 }
 function finishClose(){
+  if (!closeSheetNotice()) return;
   flushNote(); cancelAnimationFrame(sheetAnim);
   sheetEl.style.transition = "none"; scrimEl.style.transition = "none";
   document.body.classList.remove("sheet-open"); sheetEl.classList.remove("show"); scrimEl.classList.remove("show");
@@ -1013,7 +1020,7 @@ function finishClose(){
     else spring(0, v, sheetResetStyles);
   }
   sheetEl.addEventListener("pointerdown", function(e){
-    if (!sheetEl.classList.contains("show") || reduced()) return;
+    if (!sheetEl.classList.contains("show") || reduced() || sheetNotice) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     var t = e.target;
     if (t.closest(".sheet-close")) return;
@@ -1046,6 +1053,80 @@ function finishClose(){
   function up(){ cand = null; if (d) { sheetEl.style.userSelect = ""; end(); } }
   sheetEl.addEventListener("pointerup", up); sheetEl.addEventListener("pointercancel", up);
 })();
+
+/* ===== UPDATE NOTICES: shared detail/settings sheet ===== */
+function closeSheetNotice(){
+  if (!sheetNotice) return true;
+  if (sheetNotice.busy || noticeClosing) return false;
+  var notice = sheetNotice, api = bridge();
+  if (notice.kind === "update") {
+    if (api) api.dismiss_update();
+    sheetNotice = null; return true;
+  }
+  noticeClosing = true;
+  var failed = function(){ noticeClosing = false; document.getElementById("noticeStatus").textContent = "Could not remember this notice. Please try closing it again."; };
+  try {
+    Promise.resolve(api ? api.acknowledge_update(notice.version) : true).then(function(ok){
+      noticeClosing = false;
+      if (!ok) { failed(); return; }
+      sheetNotice = null; hideSheet();
+    }, failed);
+  } catch(e){ failed(); }
+  return false;
+}
+function canShowNotice(){
+  return (!EMBEDDED || bridge()) && !sheetEl.classList.contains("show") && !document.getElementById("state-overlay").classList.contains("show");
+}
+function showUpdatePrompt(info){
+  if (sheetNotice && sheetNotice.kind !== "update") return false;
+  if (!sheetNotice) {
+    if (!canShowNotice()) return false;
+    showSheet("Update available", '<div class="detail-block"><p id="noticeStatus" class="detail-desc" role="status" aria-live="polite"></p></div>'+
+      '<div class="detail-block"><p>Install the latest version? The app will restart.</p></div>'+
+      '<button class="btn-primary" id="updateInstall">Update now</button><button class="btn-secondary" id="updateLater">Not now</button>');
+    sheetNotice = {kind:"update"};
+    document.getElementById("updateInstall").onclick = function(){
+      var api = bridge(); if (!api || sheetNotice.busy) return;
+      showUpdatePrompt({text:"Downloading update...",busy:true});
+      Promise.resolve(api.install_update()).catch(function(){ showUpdatePrompt({text:"Could not start the update. Please try again.",failed:true}); });
+    };
+    document.getElementById("updateLater").onclick = hideSheet;
+  }
+  if (sheetNotice.text === info.text && sheetNotice.busy === !!info.busy && sheetNotice.failed === !!info.failed) return true;
+  sheetNotice.text = info.text; sheetNotice.busy = !!info.busy; sheetNotice.failed = !!info.failed;
+  document.getElementById("noticeStatus").textContent = info.text || "A new version is available.";
+  document.getElementById("updateInstall").textContent = info.failed ? "Try again" : "Update now";
+  document.getElementById("updateInstall").style.display = info.busy ? "none" : "";
+  document.getElementById("updateLater").style.display = info.busy ? "none" : "";
+  document.getElementById("updateLater").textContent = info.failed ? "Close" : "Not now";
+  document.getElementById("sheetClose").disabled = !!info.busy;
+  sheetEl.setAttribute("aria-busy", info.busy ? "true" : "false");
+  return true;
+}
+function releaseNotesHTML(text){
+  var html = "", list = false;
+  String(text || "No release notes were provided for this version.").split(/\r?\n/).forEach(function(line){
+    var bullet = /^\s*[-*+]\s+/.test(line);
+    if (list && !bullet) { html += "</ul>"; list = false; }
+    var safe = esc(line.replace(/^\s*#{1,6}\s+|^\s*[-*+]\s+/g, "")).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    if (bullet) { if (!list) { html += "<ul>"; list = true; } html += "<li>"+safe+"</li>"; }
+    else if (/^\s*#{1,6}\s+/.test(line)) html += "<h4>"+safe+"</h4>";
+    else if (line.trim()) html += "<p>"+safe+"</p>";
+  });
+  return html + (list ? "</ul>" : "");
+}
+function showReleaseNotes(info){
+  if (sheetNotice) return sheetNotice.kind === "release";
+  if (!canShowNotice()) return false;
+  showSheet("What's new", '<div class="detail-block"><div class="detail-desc">Updated to version '+esc(info.version)+'</div></div>'+
+    '<div class="detail-block release-notes">'+releaseNotesHTML(info.notes)+'</div>'+
+    '<p id="noticeStatus" role="status" aria-live="polite"></p><button class="btn-primary" id="releaseDone">Got it</button>');
+  sheetNotice = {kind:"release",version:info.version};
+  document.getElementById("sheetClose").disabled = false;
+  sheetEl.removeAttribute("aria-busy");
+  document.getElementById("releaseDone").onclick = hideSheet;
+  return true;
+}
 
 /* undo toast */
 var toastTimer = 0, toastUndoFn = null;

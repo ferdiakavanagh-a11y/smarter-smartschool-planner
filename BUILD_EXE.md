@@ -69,6 +69,18 @@ Any time `desktop_app.py`, `sync.py`, `build_dashboard.py`, `planner_html.py`,
 `task_state.py`, or `dutch_dates.py` changes (e.g. I send you an update),
 just double-click `build_exe.bat` again to rebuild the exe with the new code.
 
+## Release notes and update notices
+
+When publishing a release, update both `__version__` and `RELEASE_NOTES` in
+`version.py`, and write the complete feature list in the GitHub release body.
+The updater saves those GitHub notes locally before launching the installer.
+Bundled notes provide an offline fallback, including upgrades from older apps.
+
+The installer marks upgrades with `--updated`; fresh installs do not show an
+update notice. Both the update offer and What's new use the planner's existing
+glass sheet and themes. Dismissed versions are remembered in the local
+`data/update_notice.json` file. No planner or credential data is included.
+
 ## If the build or the app fails
 
 Most common cause: PyInstaller couldn't find something the `smartschool` or

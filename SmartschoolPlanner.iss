@@ -38,11 +38,17 @@ Name: "{autoprograms}\{#AppName} - Change login details"; Filename: "{app}\{#App
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall
+Filename: "{app}\{#AppExe}"; Parameters: "{code:LaunchParameters}"; Description: "Launch {#AppName}"; Flags: nowait postinstall
 
 [Code]
 var
   CredPage: TInputQueryWizardPage;
+  WasUpgrade: Boolean;
+
+function LaunchParameters(Param: String): String;
+begin
+  if WasUpgrade then Result := '--updated' else Result := '';
+end;
 
 function InitializeSetup: Boolean;
 var RC: Integer;
@@ -174,6 +180,8 @@ var
   RC: Integer;
   Bad: Boolean;
 begin
+  if CurStep = ssInstall then
+    WasUpgrade := FileExists(ExpandConstant('{app}\{#AppExe}'));
   if (CurStep = ssPostInstall) and (not FileExists(CredFile)) then
   begin
     Mfa := NormalizeSecurity(CredPage.Values[3], Bad);
