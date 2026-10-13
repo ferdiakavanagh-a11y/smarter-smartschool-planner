@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -139,7 +140,7 @@ transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-ou
 .task-pin{position:absolute;top:10px;right:10px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--text-tertiary);opacity:0;transition:opacity 150ms,color 150ms,transform 120ms}
 .task-pin::before{content:"";position:absolute;inset:-7px}
 .task-pin svg{width:16px;height:16px}
-.task-row:hover .task-pin,.task-pin.on{opacity:1}
+.task-row:hover .task-pin,.task-pin.on,.task-pin:focus-visible{opacity:1}
 .task-pin.on{color:var(--orange)}
 .task-pin.on svg{fill:currentColor}
 .task-pin:active{transform:scale(.85)}
@@ -223,7 +224,7 @@ body.searching #searchbar{display:block}
 #sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:30;opacity:0;pointer-events:none;transition:opacity 280ms var(--ease-out)}
 #sheet-backdrop.show{opacity:1;pointer-events:auto}
 #sheet{position:fixed;left:0;right:0;margin-inline:auto;bottom:0;transform:translate(0,100%);width:min(560px,100%);max-height:86vh;z-index:31;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;padding:0 0 24px;overflow:hidden;transition:transform 300ms var(--ease-out);display:flex;flex-direction:column}
-#sheet.show{transform:translate(0,0);transition-duration:420ms}
+#sheet.show{transform:translate(0,0)}
 .sheet-grabber{width:40px;height:5px;border-radius:3px;background:var(--text-tertiary);margin:9px auto 6px;flex-shrink:0}
 .sheet-head{padding:4px 20px 12px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;position:relative;z-index:1}
 .sheet-head h2{font-size:1.375rem;font-weight:700;letter-spacing:-.02em}
@@ -526,7 +527,7 @@ if (!EMBEDDED) { try { var _s = JSON.parse(localStorage.getItem("planner.setting
 var activeTab = "todo", activeCourse = "All", completedOpen = false, sheetLink = null;
 var TABS = ["todo","missed","schedule","all","grades"];
 var TAB_TITLES = { todo:"Planner", missed:"Missed", schedule:"Schedule", all:"All Classes", grades:"Grades" };
-var searchQuery = "", noteTimer = null, noteTaskId = null;
+var searchQuery = "", noteTimer = null;
 DATA.results = DATA.results || [];
 function pad(n){ return String(n).padStart(2,"0"); }
 function isoOffset(days){ var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+days); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
@@ -544,8 +545,13 @@ function courseVar(c){
 /* ===== HELPERS ===== */
 function parseDay(s){ return new Date(s + "T00:00:00"); }
 function daysBetween(a,b){ return Math.round((parseDay(b) - parseDay(a)) / 86400000); }
-function fmtDate(iso){ if(!iso) return "-"; return parseDay(iso).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }
-function fmtLong(iso){ if(!iso) return "-"; return parseDay(iso).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}); }
+var SHORT_DATE = new Intl.DateTimeFormat("en-GB", {weekday:"short",day:"numeric",month:"short"});
+var LONG_DATE = new Intl.DateTimeFormat("en-GB", {weekday:"long",day:"numeric",month:"long"});
+var SHORT_WEEKDAY = new Intl.DateTimeFormat("en-GB", {weekday:"short"});
+var LONG_WEEKDAY = new Intl.DateTimeFormat("en-GB", {weekday:"long"});
+function formattedDay(iso, formatter){ var day = parseDay(iso); return isNaN(day.getTime()) ? "Invalid Date" : formatter.format(day); }
+function fmtDate(iso){ return iso ? formattedDay(iso, SHORT_DATE) : "-"; }
+function fmtLong(iso){ return iso ? formattedDay(iso, LONG_DATE) : "-"; }
 function relLabel(iso){
   if (!iso) return "-";
   var d = daysBetween(TODAY, iso);
@@ -613,10 +619,11 @@ function render(data, completed, opts){
 
 function renderChips(data){
   var el = document.getElementById("chips");
-  if (activeTab !== "todo") { el.innerHTML = ""; return; }
+  if (activeTab !== "todo") { if (el.__chipsHTML !== "") el.innerHTML = ""; el.__chipsHTML = ""; return; }
   var seen = {}, courses = ["All"];
   data.todos.forEach(function(t){ if (!seen[t.course]) { seen[t.course]=1; courses.push(t.course); } });
-  el.innerHTML = courses.map(function(c){ return '<button class="chip'+(c===activeCourse?" active":"")+'" aria-pressed="'+(c===activeCourse?"true":"false")+'" data-course="'+esc(c)+'">'+esc(c)+'</button>'; }).join("");
+  var html = courses.map(function(c){ return '<button class="chip'+(c===activeCourse?" active":"")+'" aria-pressed="'+(c===activeCourse?"true":"false")+'" data-course="'+esc(c)+'">'+esc(c)+'</button>'; }).join("");
+  if (el.__chipsHTML !== html) { el.innerHTML = html; el.__chipsHTML = html; }
 }
 
 function badges(t){
@@ -683,7 +690,7 @@ function localSummary(w){
   if (!w.total) return "Nothing is due in the next 7 days.";
   var out = w.total + (w.total === 1 ? " task is" : " tasks are") + " due in the next 7 days";
   out += w.tests ? ", including " + w.tests + (w.tests === 1 ? " test or evaluation." : " tests or evaluations.") : ".";
-  if (w.peak >= 0) out += " Busiest day: " + parseDay(w.days[w.peak].date).toLocaleDateString("en-GB",{weekday:"long"}) + " (" + w.days[w.peak].n + (w.days[w.peak].n === 1 ? " item" : " items") + ").";
+  if (w.peak >= 0) out += " Busiest day: " + LONG_WEEKDAY.format(parseDay(w.days[w.peak].date)) + " (" + w.days[w.peak].n + (w.days[w.peak].n === 1 ? " item" : " items") + ").";
   return out;
 }
 function renderOverview(data, completed){
@@ -691,7 +698,7 @@ function renderOverview(data, completed){
   w.days.forEach(function(d){ if (d.score > max) max = d.score; });
   var bars = w.days.map(function(d, i){
     var cls = "busy-col" + (d.score === 0 ? " zero" : d.score >= 6 ? " high" : d.score >= 3 ? " mid" : "") + (i === 0 ? " today" : "");
-    var label = parseDay(d.date).toLocaleDateString("en-GB",{weekday:"short"});
+    var label = SHORT_WEEKDAY.format(parseDay(d.date));
     var tip = fmtDate(d.date) + ": " + d.n + (d.n === 1 ? " task" : " tasks") + (d.tests ? ", " + d.tests + (d.tests === 1 ? " test" : " tests") : "");
     return '<div class="'+cls+'" tabindex="0" role="img" data-tip="'+esc(tip)+'" aria-label="'+esc(tip)+'"><span class="busy-n">'+(d.n||"")+'</span><div class="busy-bar" style="height:'+Math.max(4, Math.round(d.score / max * 58))+'px"></div><span class="busy-day">'+(i===0?"Today":label)+'</span></div>';
   }).join("");
@@ -934,20 +941,28 @@ var INERT_IDS = ["header","chips","searchbar","warnBar","scroll","tabbar"], shee
 function setInert(on){ INERT_IDS.forEach(function(id){ var el = document.getElementById(id); if (!el) return; if (on) el.setAttribute("inert",""); else el.removeAttribute("inert"); }); }
 function sheetResetStyles(){
   cancelAnimationFrame(sheetAnim);
+  if (!sheetEl.style.transform && !sheetEl.style.transition && !scrimEl.style.opacity) return;
   sheetEl.style.transition = "none"; scrimEl.style.transition = "none";
   sheetEl.style.transform = ""; scrimEl.style.opacity = "";
   void sheetEl.offsetHeight;
   sheetEl.style.transition = ""; scrimEl.style.transition = "";
 }
 function restoreFocus(){ if (sheetRet && document.body.contains(sheetRet) && sheetRet.focus) sheetRet.focus({preventScroll:true}); sheetRet = null; }
-function showSheet(title, body, link){
+function showSheet(title, body, link, reuse){
   sheetLink = link || null;
   if (!sheetEl.classList.contains("show")) sheetRet = document.activeElement;
   sheetResetStyles();
-  document.getElementById("sheetTitle").textContent = title;
-  document.getElementById("sheetBody").innerHTML = body; document.getElementById("sheetBody").scrollTop = 0;
+  var heading = document.getElementById("sheetTitle"), content = document.getElementById("sheetBody");
+  if (heading.textContent !== title) heading.textContent = title;
+  var rebuilt = !reuse || sheetEl.__body !== body;
+  if (rebuilt) content.innerHTML = body;
+  sheetEl.__body = reuse ? body : null;
+  content.scrollTop = 0;
+  // Install the final-size filter before the entrance, not during its first frames.
+  if (rebuilt && LENS.ok) lensApplyBatch([sheetEl]);
   sheetEl.classList.add("show"); document.body.classList.add("sheet-open"); scrimEl.classList.add("show");
   setInert(true); sheetEl.focus({preventScroll:true});
+  return rebuilt;
 }
 function hideSheet(){
   flushNote();
@@ -1056,15 +1071,15 @@ function openSettings(){
     '<div class="setting-group"><h4>Mode</h4><div class="detail-list"><div class="seg-control">'+
       ["auto","light","dark"].map(function(m){ return '<button class="seg'+((loadSetting("scheme")||"auto")===m?" active":"")+'" data-scheme-opt="'+m+'">'+m.charAt(0).toUpperCase()+m.slice(1)+'</button>'; }).join("")+'</div></div></div>'+
     '<div class="setting-group"><h4>Liquid glass</h4><div class="detail-list"><div style="padding:14px 16px">'+
-      '<input type="range" min="0" max="2" step="1" value="'+currentLevel()+'" class="glass-slider" id="glassSlider">'+
+      '<input type="range" min="0" max="2" step="1" value="'+currentLevel()+'" class="glass-slider" id="glassSlider" aria-label="Liquid glass strength">'+
       '<div class="glass-level-labels"><span>Subtle</span><span>Balanced</span><span>Strong</span></div></div></div></div>'+
     '<div class="setting-group"><h4>Text size</h4><div class="detail-list"><div class="seg-control">'+
       [["s","Small"],["m","Default"],["l","Large"]].map(function(o){ return '<button class="seg'+((loadSetting("textSize")||"m")===o[0]?" active":"")+'" data-text-opt="'+o[0]+'">'+o[1]+'</button>'; }).join("")+'</div></div></div>'+
-    '<div class="setting-group"><h4>Accessibility</h4><div class="detail-list"><div class="setting-row"><span>Reduce motion</span><div class="toggle'+(loadSetting("reduceMotion")?" on":"")+'" id="motionToggle" role="switch" tabindex="0" aria-checked="'+(loadSetting("reduceMotion")?"true":"false")+'"></div></div>'+
-      '<div class="setting-row"><span>Animated background</span><div class="toggle'+(loadSetting("animatedBg")===false?"":" on")+'" id="bgToggle" role="switch" tabindex="0" aria-checked="'+(loadSetting("animatedBg")===false?"false":"true")+'"></div></div></div></div>'+
+    '<div class="setting-group"><h4>Accessibility</h4><div class="detail-list"><div class="setting-row"><span>Reduce motion</span><div class="toggle'+(loadSetting("reduceMotion")?" on":"")+'" id="motionToggle" role="switch" tabindex="0" aria-label="Reduce motion" aria-checked="'+(loadSetting("reduceMotion")?"true":"false")+'"></div></div>'+
+      '<div class="setting-row"><span>Animated background</span><div class="toggle'+(loadSetting("animatedBg")===false?"":" on")+'" id="bgToggle" role="switch" tabindex="0" aria-label="Animated background" aria-checked="'+(loadSetting("animatedBg")===false?"false":"true")+'"></div></div></div></div>'+
     (DATA.main_url ? '<div class="setting-group"><h4>Account</h4><div class="detail-list">'+rows([["School",DATA.main_url]])+'</div></div>'+
     '<button class="btn-primary" data-external="1">'+ICON.ext+' Open in Smartschool</button>' : "");
-  showSheet("Settings", body);
+  if (!showSheet("Settings", body, null, true)) return;
   var slider = document.getElementById("glassSlider");
   slider.addEventListener("input", function(){ var v = parseInt(slider.value,10); applyGlassLevel(v); saveSetting("glassLevel", v); });
   var tog = document.getElementById("motionToggle");
@@ -1284,7 +1299,6 @@ document.getElementById("scroll").addEventListener("click", function(e){
 });
 document.getElementById("sheetBody").addEventListener("input", function(e){
   if (e.target.id !== "noteArea") return;
-  noteTaskId = e.target.getAttribute("data-note");
   if (noteTimer) clearTimeout(noteTimer);
   noteTimer = setTimeout(flushNote, 500);
 });
@@ -1370,16 +1384,24 @@ var LENS = { ok: false, n: 0, cache: {}, seen: null, ro: null, defs: null };
   var NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.setAttribute("aria-hidden", "true"); svg.style.cssText = "position:absolute;pointer-events:none";
   LENS.defs = document.createElementNS(NS, "defs"); svg.appendChild(LENS.defs); document.body.appendChild(svg);
-  LENS.seen = new WeakSet();
-  LENS.q = new Set(); LENS.flush = function(){ LENS.q.forEach(lensApply); LENS.q.clear(); };
-  LENS.ro = new ResizeObserver(function(es){ es.forEach(function(e){ if (document.body.classList.contains("resizing")) LENS.q.add(e.target); else lensApply(e.target); }); });
+  LENS.seen = new Set();
+  LENS.q = new Set(); LENS.flush = function(){ lensApplyBatch(Array.from(LENS.q)); LENS.q.clear(); };
+  LENS.ro = new ResizeObserver(function(es){
+    var resizing = document.body.classList.contains("resizing"), ready = [];
+    es.forEach(function(e){ if (!LENS.seen.has(e.target)) return; if (resizing) LENS.q.add(e.target); else ready.push(e.target); });
+    lensApplyBatch(ready);
+  });
 })();
 function lensMapURL(w, h, r, bezel){
   var c = document.createElement("canvas"); c.width = w; c.height = h;
   var x = c.getContext("2d"), img = x.createImageData(w, h), d = img.data, hw = w / 2, hh = h / 2;
+  // The interior is neutral; calculate displacement only around the unchanged glass edge.
+  var inset = Math.ceil(r + bezel), skipInterior = w > 2 * inset && h > 2 * inset;
+  if (skipInterior) { d.fill(128); for (var a = 3; a < d.length; a += 4) d[a] = 255; }
   for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
+    if (skipInterior && j >= inset && j < h - inset && i === inset) i = w - inset;
     var px = i + .5 - hw, py = j + .5 - hh, qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r);
-    var ox = Math.max(qx, 0), oy = Math.max(qy, 0), depth = -(Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - r), k = (j * w + i) * 4, dx = 0, dy = 0;
+    var ox = Math.max(qx, 0), oy = Math.max(qy, 0), depth = -((ox || oy ? Math.hypot(ox, oy) : 0) + Math.min(Math.max(qx, qy), 0) - r), k = (j * w + i) * 4, dx = 0, dy = 0;
     if (depth > 0 && depth < bezel) {
       var mag = Math.pow(1 - depth / bezel, 2.2), nx, ny;
       if (qx > 0 || qy > 0) { nx = (px < 0 ? -ox : ox); ny = (py < 0 ? -oy : oy); var L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L; }
@@ -1406,20 +1428,47 @@ function lensFilterId(w, h, r){
   LENS.cache[key] = id; return id;
 }
 var LENS_SEL = [["#tabbar", .6], [".chip", .5], [".icon-btn", .45], ["#sheet", .7], ["#tabbar .bubble", .2]];
-function lensApply(el){
+function lensMeasure(el){
+  var w = el.offsetWidth, h = el.offsetHeight;
+  if (el.__r === undefined) el.__r = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+  return { el: el, w: w, h: h, r: Math.min(el.__r, w / 2, h / 2) };
+}
+function lensApplyBatch(elements){
+  // Read every size before applying filters: style writes must not interrupt layout reads.
+  elements.map(lensMeasure).forEach(function(size){ lensApply(size.el, size); });
+  lensPrune();
+}
+function lensPrune(){
+  var keys = Object.keys(LENS.cache), remaining = keys.length;
+  if (remaining <= 32) return;
+  var active = new Set();
+  LENS.seen.forEach(function(el){ if (el.__lk) active.add(el.__lk.split("|")[0]); });
+  keys.forEach(function(key){
+    var id = LENS.cache[key];
+    if (remaining <= 32 || active.has(id)) return;
+    var filter = document.getElementById(id); if (filter) filter.remove();
+    delete LENS.cache[key]; remaining--;
+  });
+}
+function lensApply(el, size){
   if (!LENS.ok) return;
-  var w = el.offsetWidth, h = el.offsetHeight; if (w < 24 || h < 24) return;
-  if (el.__r === undefined) el.__r = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0; var r = Math.min(el.__r, w / 2, h / 2), id = lensFilterId(w, h, r), k = id + "|" + el.__lf;
+  size = size || lensMeasure(el);
+  var w = size.w, h = size.h; if (w < 24 || h < 24) return;
+  var id = lensFilterId(w, h, size.r), k = id + "|" + el.__lf;
   if (el.__lk === k) return; el.__lk = k;
   var v = "url(#" + id + ") blur(calc(var(--glass-blur) * " + el.__lf + ")) saturate(var(--glass-saturate))";
   el.style.backdropFilter = v; el.style.webkitBackdropFilter = v;
 }
 function lensScan(){
   if (!LENS.ok) return;
+  var next = new Set(), elements = [];
   LENS_SEL.forEach(function(p){
     var list = document.querySelectorAll(p[0]);
-    for (var i = 0; i < list.length; i++) { var el = list[i]; el.__lf = p[1]; lensApply(el); if (!LENS.seen.has(el)) { LENS.seen.add(el); LENS.ro.observe(el); } }
+    for (var i = 0; i < list.length; i++) { var el = list[i]; el.__lf = p[1]; next.add(el); elements.push(el); if (!LENS.seen.has(el)) LENS.ro.observe(el); }
   });
+  LENS.seen.forEach(function(el){ if (!next.has(el)) { LENS.ro.unobserve(el); LENS.q.delete(el); } });
+  LENS.seen = next;
+  lensApplyBatch(elements);
 }
 var _renderLens = render; render = function(){ var r = _renderLens.apply(this, arguments); lensScan(); return r; };
 lensScan();
@@ -1496,19 +1545,24 @@ def _json(obj) -> str:
 
 
 _EMPTY_DATA = {"todos": [], "days": [], "all_classes": [], "main_url": "", "generated_at": None}
+_PLACEHOLDER_RE = re.compile(
+    r"__WC_VARS__|__EMBEDDED_JSON__|__BOOT_JSON__|__DATA_JSON__|"
+    r"__COMPLETED_JSON__|__SETTINGS_JSON__|__PINNED_JSON__|__NOTES_JSON__"
+)
 
 
 def _build(data, completed_ids, embedded, settings, boot, pinned=None, notes=None) -> str:
-    return (
-        TEMPLATE.replace("__WC_VARS__", _window_button_css())
-        .replace("__EMBEDDED_JSON__", "true" if embedded else "false")
-        .replace("__BOOT_JSON__", _json(boot))
-        .replace("__DATA_JSON__", _json(data))
-        .replace("__COMPLETED_JSON__", _json(list(completed_ids)))
-        .replace("__SETTINGS_JSON__", _json(settings or {}))
-        .replace("__PINNED_JSON__", _json(list(pinned or [])))
-        .replace("__NOTES_JSON__", _json(notes or {}))
-    )
+    values = {
+        "__WC_VARS__": _window_button_css(),
+        "__EMBEDDED_JSON__": "true" if embedded else "false",
+        "__BOOT_JSON__": _json(boot),
+        "__DATA_JSON__": _json(data),
+        "__COMPLETED_JSON__": _json(list(completed_ids)),
+        "__SETTINGS_JSON__": _json(settings or {}),
+        "__PINNED_JSON__": _json(list(pinned or [])),
+        "__NOTES_JSON__": _json(notes or {}),
+    }
+    return _PLACEHOLDER_RE.sub(lambda match: values[match.group(0)], TEMPLATE)
 
 
 def render_html(

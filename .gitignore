@@ -2,7 +2,7 @@
 credentials.yml
 data/
 dashboard.html
-
+context.md
 # build leftovers
 build/
 dist/

@@ -104,6 +104,20 @@ that data straight away.
 `run_daily.bat` needs Python and works from the source folder. It doesn't
 apply to the installed version.
 
+## Performance on laptops
+The Windows WebView2 renderer uses hardware acceleration by default. The app
+does not disable it. Glass texture generation skips neutral interior pixels,
+and unused refraction filters are evicted while filters still in use are kept.
+Background wallpaper animations pause when the app loses focus.
+
+To try updated source code, restart `python desktop_app.py`. A built or installed
+`.exe` does not pick up Python source changes: rebuild it with `build_exe.bat`
+or install a release containing the changes.
+
+Performance with other browser tabs open depends on available RAM and GPU load.
+Verify scrolling and opening Settings on the target laptop; texture-generation
+benchmarks alone do not measure frame rate.
+
 ## Notes / next steps
 - Default window is 10 days back / 21 days ahead. Change with
   `python sync.py --days-back 14 --days-ahead 30` if running the CLI sync
