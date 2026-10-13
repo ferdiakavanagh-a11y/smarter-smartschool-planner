@@ -10,3 +10,4 @@ dist/
 SmartschoolPlanner.exe
 installer_output/
 __pycache__/
+tests/
