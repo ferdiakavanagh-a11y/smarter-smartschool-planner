@@ -83,6 +83,9 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 - **Display settings** - choose the **Vivid** or **Frost** look, adjust the
   glass effect with a slider, and switch on **Reduce motion**. Settings are
   remembered.
+- **Rendering modes** - choose **Performance** for weaker laptops: light frosted
+  glass, simpler shadows, and a still colored background. **Fancy** keeps full
+  glass refraction and optional background animation. Switch modes in Settings.
 - **Native-feeling window** - a frameless window with its own minimise /
   maximise / close buttons and drag-to-resize. Maximising stays inside the
   taskbar, and Windows 11 rounded corners are used where available.

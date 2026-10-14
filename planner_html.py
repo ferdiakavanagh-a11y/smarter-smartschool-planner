@@ -399,6 +399,15 @@ html[data-text="l"]{font-size:115%}
 .group::after,#tabbar::after,#sheet::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;opacity:var(--glass-specular);
  background:conic-gradient(from 200deg at 50% 50%,rgba(var(--gloss),0.950) 0deg,rgba(var(--gloss),0.908) 8deg,rgba(var(--gloss),0.790) 16deg,rgba(var(--gloss),0.617) 24deg,rgba(var(--gloss),0.421) 32deg,rgba(var(--gloss),0.240) 40deg,rgba(var(--gloss),0.105) 48deg,rgba(var(--gloss),0.043) 56deg,rgba(var(--gloss),0.040) 64deg,rgba(var(--gloss),0.040) 72deg,rgba(var(--gloss),0.040) 80deg,rgba(var(--gloss),0.040) 88deg,rgba(var(--gloss),0.040) 96deg,rgba(var(--gloss),0.040) 104deg,rgba(var(--gloss),0.040) 112deg,rgba(var(--gloss),0.040) 120deg,rgba(var(--gloss),0.040) 128deg,rgba(var(--gloss),0.040) 136deg,rgba(var(--gloss),0.051) 144deg,rgba(var(--gloss),0.095) 152deg,rgba(var(--gloss),0.169) 160deg,rgba(var(--gloss),0.258) 168deg,rgba(var(--gloss),0.350) 176deg,rgba(var(--gloss),0.428) 184deg,rgba(var(--gloss),0.481) 192deg,rgba(var(--gloss),0.500) 200deg,rgba(var(--gloss),0.474) 208deg,rgba(var(--gloss),0.401) 216deg,rgba(var(--gloss),0.298) 224deg,rgba(var(--gloss),0.188) 232deg,rgba(var(--gloss),0.098) 240deg,rgba(var(--gloss),0.047) 248deg,rgba(var(--gloss),0.040) 256deg,rgba(var(--gloss),0.040) 264deg,rgba(var(--gloss),0.040) 272deg,rgba(var(--gloss),0.040) 280deg,rgba(var(--gloss),0.040) 288deg,rgba(var(--gloss),0.040) 296deg,rgba(var(--gloss),0.040) 304deg,rgba(var(--gloss),0.040) 312deg,rgba(var(--gloss),0.045) 320deg,rgba(var(--gloss),0.161) 328deg,rgba(var(--gloss),0.394) 336deg,rgba(var(--gloss),0.661) 344deg,rgba(var(--gloss),0.871) 352deg,rgba(var(--gloss),0.950) 360deg);
  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+/* Keep the glass silhouette without continuously filtering the moving backdrop. */
+[data-rendering="performance"] .blob{animation:none}
+[data-rendering="performance"] #wallpaper{filter:none;transition:none}
+[data-rendering="performance"] :is(.glass,#searchInput,#warnBar,#state-overlay){-webkit-backdrop-filter:blur(min(var(--glass-blur),8px));backdrop-filter:blur(min(var(--glass-blur),8px))}
+[data-rendering="performance"] :is(.group,.chip,.icon-btn,#tabbar .bubble){-webkit-backdrop-filter:none;backdrop-filter:none}
+[data-rendering="performance"] .group{background-color:rgba(var(--glass-tint-dark),max(var(--glass-opacity),.35))}
+[data-rendering="performance"] :is(.glass,.group){box-shadow:inset 0 1px 0 rgba(var(--gloss),calc(.25 * var(--glass-specular))),0 4px 12px var(--glass-drop-sm);transition:background-color 160ms var(--ease-out)}
+[data-rendering="performance"] :is(.group,#tabbar,#sheet)::after{display:none}
+[data-rendering="performance"] .skel{animation:none}
 </style>
 </head>
 <body>
@@ -526,6 +535,7 @@ if (!EMBEDDED) {
   try { var _n = JSON.parse(localStorage.getItem("planner.notes") || "{}"); if (_n && typeof _n === "object") NOTES = _n; } catch(e){}
 }
 if (!EMBEDDED) { try { var _s = JSON.parse(localStorage.getItem("planner.settings") || "{}"); for (var _k in _s) if (!(_k in SETTINGS)) SETTINGS[_k] = _s[_k]; } catch(e){} }
+document.documentElement.setAttribute('data-rendering', renderingMode());
 
 /* ===== STATE ===== */
 var activeTab = "todo", activeCourse = "All", completedOpen = false, sheetLink = null;
@@ -1148,7 +1158,7 @@ function renderingOptions(unselected){
   return '<div class="seg-control">'+["performance","fancy"].map(function(m){
     var active = !unselected && renderingMode() === m;
     return '<button class="seg'+(active?' active':'')+'" data-rendering-opt="'+m+'" aria-pressed="'+active+'">'+(m==="performance"?'Performance':'Fancy')+'</button>';
-  }).join('')+'</div><div class="detail-desc" style="padding:12px 16px">Performance: simpler glass refraction for weaker systems.<br>Fancy: full glass refraction with subtle color dispersion.</div>';
+  }).join('')+'</div><div class="detail-desc" style="padding:12px 16px">Performance: light frosted glass and a still background for weaker systems.<br>Fancy: full glass refraction with subtle color dispersion.</div>';
 }
 function setRenderingMode(mode){
   if (mode !== "performance" && mode !== "fancy") return;
@@ -1166,6 +1176,7 @@ function setRenderingMode(mode){
     Promise.resolve(saved).then(function(ok){
       if (!ok) { failed(); return; }
       SETTINGS.renderingMode = mode;
+      document.documentElement.setAttribute('data-rendering', mode);
       if (LENS.ok) {
         LENS.defs.textContent = ''; LENS.cache = {};
         LENS.seen.forEach(function(el){ el.__lk = null; });
@@ -1204,7 +1215,7 @@ function openSettings(){
     '<div class="setting-group"><h4>Text size</h4><div class="detail-list"><div class="seg-control">'+
       [["s","Small"],["m","Default"],["l","Large"]].map(function(o){ return '<button class="seg'+((loadSetting("textSize")||"m")===o[0]?" active":"")+'" data-text-opt="'+o[0]+'">'+o[1]+'</button>'; }).join("")+'</div></div></div>'+
     '<div class="setting-group"><h4>Accessibility</h4><div class="detail-list"><div class="setting-row"><span>Reduce motion</span><div class="toggle'+(loadSetting("reduceMotion")?" on":"")+'" id="motionToggle" role="switch" tabindex="0" aria-label="Reduce motion" aria-checked="'+(loadSetting("reduceMotion")?"true":"false")+'"></div></div>'+
-      '<div class="setting-row"><span>Animated background</span><div class="toggle'+(loadSetting("animatedBg")===false?"":" on")+'" id="bgToggle" role="switch" tabindex="0" aria-label="Animated background" aria-checked="'+(loadSetting("animatedBg")===false?"false":"true")+'"></div></div></div></div>'+
+      '<div class="setting-row"><span>Animated background (Fancy)</span><div class="toggle'+(loadSetting("animatedBg")===false?"":" on")+'" id="bgToggle" role="switch" tabindex="0" aria-label="Animated background (Fancy)" aria-checked="'+(loadSetting("animatedBg")===false?"false":"true")+'"></div></div></div></div>'+
     (DATA.main_url ? '<div class="setting-group"><h4>Account</h4><div class="detail-list">'+rows([["School",DATA.main_url]])+'</div></div>'+
     '<button class="btn-primary" data-external="1">'+ICON.ext+' Open in Smartschool</button>' : "");
   if (!showSheet("Settings", body, null, true)) return;
@@ -1547,15 +1558,11 @@ function lensFilterId(w, h, r){
   var id = "lens" + (++LENS.n), cm = { R: "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1", G: "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1", B: "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 0 1" };
   var f = '<filter xmlns="http://www.w3.org/2000/svg" id="' + id + '" filterUnits="userSpaceOnUse" x="0" y="0" width="' + w + '" height="' + h + '" color-interpolation-filters="sRGB">' +
     '<feImage href="' + lensMapURL(w, h, r, bezel) + '" x="0" y="0" width="' + w + '" height="' + h + '" preserveAspectRatio="none" result="m"/>';
-  if (renderingMode() === 'performance') {
-    f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2) + '" xChannelSelector="R" yChannelSelector="G"/></filter>';
-  } else {
-    [["a", "R", 1], ["b", "G", .93], ["c", "B", .86]].forEach(function(t){
+  [["a", "R", 1], ["b", "G", .93], ["c", "B", .86]].forEach(function(t){
       f += '<feDisplacementMap in="SourceGraphic" in2="m" scale="' + (shift * 2 * t[2]) + '" xChannelSelector="R" yChannelSelector="G" result="d' + t[0] + '"/>' +
            '<feColorMatrix in="d' + t[0] + '" type="matrix" values="' + cm[t[1]] + '" result="' + t[1] + '"/>';
-    });
-    f += '<feBlend in="R" in2="G" mode="lighten" result="rg"/><feBlend in="rg" in2="B" mode="lighten"/></filter>';
-  }
+  });
+  f += '<feBlend in="R" in2="G" mode="lighten" result="rg"/><feBlend in="rg" in2="B" mode="lighten"/></filter>';
   var holder = document.createElementNS("http://www.w3.org/2000/svg", "svg"); holder.innerHTML = f;
   LENS.defs.appendChild(holder.firstChild);
   LENS.cache[key] = id; return id;
@@ -1567,6 +1574,7 @@ function lensMeasure(el){
   return { el: el, w: w, h: h, r: Math.min(el.__r, w / 2, h / 2) };
 }
 function lensApplyBatch(elements){
+  if (renderingMode() === 'performance') return;
   // Read every size before applying filters: style writes must not interrupt layout reads.
   elements.map(lensMeasure).forEach(function(size){ lensApply(size.el, size); });
   lensPrune();
@@ -1584,7 +1592,7 @@ function lensPrune(){
   });
 }
 function lensApply(el, size){
-  if (!LENS.ok) return;
+  if (!LENS.ok || renderingMode() === 'performance') return;
   size = size || lensMeasure(el);
   var w = size.w, h = size.h; if (w < 24 || h < 24) return;
   var id = lensFilterId(w, h, size.r), k = id + "|" + el.__lf;
@@ -1594,6 +1602,14 @@ function lensApply(el, size){
 }
 function lensScan(){
   if (!LENS.ok) return;
+  if (renderingMode() === 'performance') {
+    LENS.seen.forEach(function(el){
+      el.style.backdropFilter = ''; el.style.webkitBackdropFilter = ''; el.__lk = null;
+      LENS.ro.unobserve(el);
+    });
+    LENS.seen.clear(); LENS.q.clear();
+    return;
+  }
   var next = new Set(), elements = [];
   LENS_SEL.forEach(function(p){
     var list = document.querySelectorAll(p[0]);
