@@ -20,6 +20,7 @@ if errorlevel 1 (
 )
 
 call build_exe.bat
+if errorlevel 1 exit /b 1
 if not exist "SmartschoolPlanner.exe" (
     echo ERROR: SmartschoolPlanner.exe was not built.
     pause

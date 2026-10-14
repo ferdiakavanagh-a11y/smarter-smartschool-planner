@@ -86,6 +86,10 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 - **Rendering modes** - choose **Performance** for weaker laptops: light frosted
   glass, simpler shadows, and a still colored background. **Fancy** keeps full
   glass refraction and optional background animation. Switch modes in Settings.
+- **Task focus** - open a task's details and choose **Focus** for a compact,
+  resizable window with instructions, links, a stopwatch, pause/resume, and optional
+  keep on top. Reminder types such as Meebrengen are excluded. Exit restores your
+  window; marking complete is separate. Sessions survive sync, but end when the app closes.
 - **Native-feeling window** - a frameless window with its own minimise /
   maximise / close buttons and drag-to-resize. Maximising stays inside the
   taskbar, and Windows 11 rounded corners are used where available.

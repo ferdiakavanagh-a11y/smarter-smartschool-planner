@@ -1,39 +1,38 @@
-# Turning this into a real desktop app (Windows .exe)
+# Building the Windows desktop app
 
-This can't be built for you remotely - an .exe has to be built on the same
-kind of machine it'll run on. But it's a one-time, one-command step on your
-end, and after that you get a real windowed app: no terminal, no typing
-commands, just double-click and it opens.
+## Build
 
-## One-time build
+1. Install Python 3.11+ and run `python -m pip install -r requirements.txt`.
+2. Run **build_exe.bat**, or **setup_and_build.bat** to also compile the installer
+   when Inno Setup 6 is installed.
+3. The build produces `dist\SmartschoolPlanner\SmartschoolPlanner.exe` and its
+   `_internal` support directory. It also copies both beside the source files,
+   keeping your existing local credentials and planner data in use.
 
-1. Make sure you've already run `pip install -r requirements.txt` (see
-   SETUP.md) - this now also installs `pywebview`, which is what gives the
-   app its actual window (no browser, no console).
-2. **If you built an exe from this project before** (whether the old
-   console version or an earlier version of the windowed app): delete
-   `SmartschoolPlanner.spec`, and the `build\` and `dist\` folders if they
-   exist, first. The build script reuses that `.spec` file to speed up
-   rebuilds, but a stale one won't include newly-added dependencies (like
-   `pywebview` originally, or `google-genai` for the optional AI deadline
-   fallback) - it would silently rebuild an outdated version.
-3. Double-click **build_exe.bat** in this folder (or run it from a
-   terminal). It installs PyInstaller and packages `desktop_app.py` + its
-   dependencies into `SmartschoolPlanner.exe`, then copies that exe into
-   this same folder.
-4. This takes a minute or two. When it's done you'll have
-   `SmartschoolPlanner.exe` sitting next to `sync.py`, `credentials.yml`, etc.
+The executable uses PyInstaller's folder bundle so libraries do not have to be
+extracted on every launch. **Keep `_internal` beside the executable.** To move a
+portable copy, copy the complete bundle, not just the EXE. Credentials and the
+`data` directory remain beside the EXE, separate from `_internal`.
 
-You can delete the `build\` and `dist\` folders and the `.spec` file
-afterwards - they're just leftovers from the build, not needed to run the
-exe.
+Builds always regenerate the spec from the current command; old single-file
+specs are not reused. You can delete `build`, `dist`, and the generated `.spec`
+after compiling the installer, but keep the root `_internal` to run the local EXE.
+
+## Installer and updates
+
+Inno Setup packages the complete `dist\SmartschoolPlanner` bundle. GitHub's
+release workflow still publishes `SmartschoolPlanner-Setup.exe` and its checksum.
+Existing shortcuts, install location, app identity, credentials, and data paths
+are unchanged. The existing updater downloads and verifies the installer, which
+replaces both the EXE and bundled support files. First-install and upgrade
+rendering-choice behavior is unchanged.
 
 ## Using it
 
 Double-click `SmartschoolPlanner.exe`. A real window opens (no console, no
 browser chrome) showing:
 - Whatever data you already have, instantly (if you've synced before)
-- Then it syncs fresh in the background and updates automatically
+- Opens the saved planner without syncing; updates are checked in the background
 - A "Sync now" button in the top-right to refresh on demand
 - Four tabs: **To-Do**, **Missed**, **Schedule**, **All Classes** (see
   README.md for what each shows)
@@ -61,7 +60,7 @@ https://developer.microsoft.com/microsoft-edge/webview2/ and get the
 `build_dashboard.py` in the background - no window pops up, which is exactly
 what you want for an unattended scheduled task. The next time you open
 `SmartschoolPlanner.exe` yourself, it'll show that freshly-synced data
-immediately and then sync again in the background to catch anything newer.
+immediately. Use Sync now to fetch newer changes.
 
 ## Rebuilding after changes
 

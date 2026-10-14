@@ -148,6 +148,14 @@ transition:background-color 260ms var(--ease-out),box-shadow 260ms var(--ease-ou
 .task-pin.on{color:var(--orange)}
 .task-pin.on svg{fill:currentColor}
 .task-pin:active{transform:scale(.85)}
+.task-row-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.task-row-actions .task-pin{position:relative;top:auto;right:auto}
+.task-focus{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--text-tertiary);opacity:0;transition:opacity 150ms,color 150ms,transform 120ms}
+.task-focus svg{width:16px;height:16px}
+.task-row:hover .task-focus,.task-row:focus-within .task-focus,.task-focus:focus-visible{opacity:1}
+.task-focus:hover{color:var(--text)}
+@media (hover:none){.task-focus,.task-pin{opacity:1}}
+.task-focus:active{transform:scale(.95)}
 .task-note{font-size:0.8125rem;line-height:1.35;color:var(--orange);margin-top:4px;font-style:italic;display:-webkit-box;-webkit-line-clamp:1;line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .task-meta svg.mini{width:13px;height:13px;vertical-align:-2px;margin-right:2px}
 #searchbar{display:none;padding:2px 20px 10px;position:relative;z-index:4}
@@ -174,6 +182,10 @@ body.searching #searchbar{display:block}
 .note-area{width:100%;box-sizing:border-box;min-height:110px;resize:vertical;border:0;outline:none;border-radius:var(--radius-row);padding:12px 14px;font:inherit;font-size:0.9375rem;line-height:1.4;color:var(--text);background:color-mix(in srgb,var(--text) 6%,transparent)}
 .btn-secondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;border-radius:var(--radius-row);font-size:0.9375rem;font-weight:600;background:var(--fill);color:var(--text);margin-bottom:10px}
 .btn-secondary svg{width:16px;height:16px}
+.task-actions{display:flex;align-items:stretch;gap:10px;margin-bottom:14px}
+.task-actions .btn-secondary{width:auto;margin:0;padding:10px 14px;font-size:.875rem}
+.task-actions [data-pin-sheet]{flex:1;min-width:0}
+.task-actions [data-focus-task]{flex-shrink:0}
 .grade-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:13px 16px;position:relative;cursor:pointer}
 .grade-row+.grade-row::before{content:"";position:absolute;left:16px;right:0;top:0;height:.5px;background:var(--separator)}
 .grade-name{font-weight:500;font-size:0.9375rem}
@@ -216,13 +228,13 @@ body.searching #searchbar{display:block}
 .empty h3{font-size:1.25rem;font-weight:700}
 .empty p{font-size:0.9375rem;color:var(--text-secondary);max-width:280px;line-height:1.4}
 
-#tabbar{position:fixed;left:0;right:0;margin-inline:auto;bottom:18px;z-index:20;display:flex;border-radius:var(--radius-chip);padding:8px 10px;gap:0;width:min(560px,calc(100% - 32px));justify-content:space-around}
-#tabbar .bubble{position:absolute;top:8px;bottom:8px;left:10px;width:calc((100% - 20px) / var(--tab-count));border-radius:var(--radius-chip);background:rgba(255,255,255,.14);border:.5px solid rgba(255,255,255,.2);transition:transform 360ms var(--ease-out);z-index:0;box-shadow:inset 0 1px 1px rgba(255,255,255,.25)}
-[data-scheme="light"] #tabbar .bubble{background:rgba(60,90,140,.07);border-color:rgba(255,255,255,.6)}
-.tab{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border-radius:var(--radius-chip);font-size:0.75rem;font-weight:500;letter-spacing:.02em;color:var(--text-secondary);transition:color 200ms,transform 120ms;min-width:0}
-.tab:active{transform:scale(.92)}
+#tabbar{position:fixed;left:0;right:0;margin-inline:auto;bottom:18px;z-index:20}.app-bar{position:relative;display:flex;border-radius:var(--radius-chip);padding:8px 10px;gap:0;width:min(560px,calc(100% - 32px));justify-content:space-around}
+.app-bar .bubble{position:absolute;top:8px;bottom:8px;left:10px;width:calc((100% - 20px) / var(--tab-count));border-radius:var(--radius-chip);background:rgba(255,255,255,.14);border:.5px solid rgba(255,255,255,.2);transition:transform 360ms var(--ease-out);z-index:0;box-shadow:inset 0 1px 1px rgba(255,255,255,.25)}
+[data-scheme="light"] .app-bar .bubble{background:rgba(60,90,140,.07);border-color:rgba(255,255,255,.6)}
+.tab,.focus-action{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border-radius:var(--radius-chip);font-size:0.75rem;font-weight:500;letter-spacing:.02em;color:var(--text-secondary);transition:color 200ms,transform 120ms;min-width:0}
+.tab:active,.focus-action:active{transform:scale(.92)}
 .tab.active{color:var(--text)}
-.tab svg{width:24px;height:24px}
+.tab svg,.focus-action svg{width:24px;height:24px}
 .tab-badge{position:absolute;top:2px;right:calc(50% - 22px);min-width:20px;height:20px;padding:0 4px;line-height:1;border-radius:999px;background:var(--red);color:#fff;font-size:0.75rem;font-weight:700;display:grid;place-items:center;border:2px solid var(--bg)}
 
 #sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:30;opacity:0;pointer-events:none;transition:opacity 280ms var(--ease-out)}
@@ -370,14 +382,14 @@ body.reduce-motion #scroll.tab-in{animation:none}
 .icon-btn:active{transform:scale(.88)}
 .seg:not(.active):hover,.btn-secondary:hover,.sheet-close:hover,#toast button:hover{background:color-mix(in srgb,var(--text) 14%,transparent)}
 }
-#tabbar{touch-action:none;background-color:rgba(var(--glass-tint-dark),calc(var(--glass-opacity) + .1))}
+.app-bar{touch-action:none;background-color:rgba(var(--glass-tint-dark),calc(var(--glass-opacity) + .1))}
 [data-style="clear"] .chip.active{background:var(--blue);color:#04101c}
 :root[data-scheme="light"][data-style="clear"] .chip.active{background:color-mix(in srgb,var(--blue) 82%,#000);color:#fff}
 .no-trans,.no-trans *,.no-trans *::before,.no-trans *::after{transition:none !important}
 html[data-text="s"]{font-size:90%}
 html[data-text="l"]{font-size:115%}
-#tabbar.scrubbing .bubble{transition:none}
-#tabbar.scrubbing .tab{transition:color 120ms}
+.app-bar.scrubbing .bubble{transition:none}
+.app-bar.scrubbing .tab{transition:color 120ms}
 .tab.peek{color:var(--text)}
 .empty .retry-btn{margin-top:6px}
 .busy-col{position:relative}
@@ -393,26 +405,73 @@ html[data-text="l"]{font-size:115%}
 .group{box-shadow:inset 2px 2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi-sm) * 1 * var(--glass-specular))),inset 6px 6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi-sm) * 0.5 * var(--glass-specular))),inset -2px -2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi-sm) * 0.45 * var(--glass-specular))),inset -6px -6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi-sm) * 0.2 * var(--glass-specular))),inset 0 0 18px rgba(var(--gloss),.06),0 8px 30px var(--glass-drop-sm)}
 .chip,.icon-btn{box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.7),inset 6px 6px 12px -8px rgba(255,255,255,0.315),inset -2px -2px 2px -2px rgba(255,255,255,0.32),inset -6px -6px 12px -8px rgba(255,255,255,0.112),0 4px 14px rgba(0,0,0,.08)}
 .chip.active{background-image:none;box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.55),inset 6px 6px 12px -8px rgba(255,255,255,0.248),0 4px 14px rgba(0,0,0,.14)}
-#tabbar .bubble{box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.85),inset 6px 6px 12px -8px rgba(255,255,255,0.383),inset -2px -2px 2px -2px rgba(255,255,255,0.4),inset -6px -6px 12px -8px rgba(255,255,255,0.14),inset 0 0 14px rgba(255,255,255,.1),0 2px 10px rgba(0,0,0,.12)}
-[data-scheme="light"] #tabbar .bubble{background-image:linear-gradient(155deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,0) 45%,rgba(255,255,255,0) 100%);box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.95),inset 6px 6px 12px -8px rgba(255,255,255,0.427),inset -2px -2px 2px -2px rgba(255,255,255,0.55),inset -6px -6px 12px -8px rgba(255,255,255,0.193),inset 0 -4px 10px -4px rgba(30,50,90,.12),inset 0 0 14px rgba(255,255,255,.06),0 2px 10px rgba(30,50,90,.14)}
-#tabbar{border-width:0;box-shadow:inset 2px 2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi) * 1 * var(--glass-specular))),inset 6px 6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi) * 0.5 * var(--glass-specular))),inset -2px -2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi) * 0.45 * var(--glass-specular))),inset -6px -6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi) * 0.2 * var(--glass-specular))),inset 0 0 22px rgba(var(--gloss),.07),inset 0 -2px 5px -2px var(--glass-inner),0 12px 40px var(--glass-drop),inset 0 0 0 .5px rgba(var(--gloss),calc(var(--gloss-border) * var(--glass-specular)))}
-.group::after,#tabbar::after,#sheet::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;opacity:var(--glass-specular);
+.app-bar .bubble{box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.85),inset 6px 6px 12px -8px rgba(255,255,255,0.383),inset -2px -2px 2px -2px rgba(255,255,255,0.4),inset -6px -6px 12px -8px rgba(255,255,255,0.14),inset 0 0 14px rgba(255,255,255,.1),0 2px 10px rgba(0,0,0,.12)}
+[data-scheme="light"] .app-bar .bubble{background-image:linear-gradient(155deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,0) 45%,rgba(255,255,255,0) 100%);box-shadow:inset 2px 2px 2px -2px rgba(255,255,255,0.95),inset 6px 6px 12px -8px rgba(255,255,255,0.427),inset -2px -2px 2px -2px rgba(255,255,255,0.55),inset -6px -6px 12px -8px rgba(255,255,255,0.193),inset 0 -4px 10px -4px rgba(30,50,90,.12),inset 0 0 14px rgba(255,255,255,.06),0 2px 10px rgba(30,50,90,.14)}
+.app-bar{border-width:0;box-shadow:inset 2px 2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi) * 1 * var(--glass-specular))),inset 6px 6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi) * 0.5 * var(--glass-specular))),inset -2px -2px 2px -2px rgba(var(--gloss),calc(var(--gloss-hi) * 0.45 * var(--glass-specular))),inset -6px -6px 12px -8px rgba(var(--gloss),calc(var(--gloss-hi) * 0.2 * var(--glass-specular))),inset 0 0 22px rgba(var(--gloss),.07),inset 0 -2px 5px -2px var(--glass-inner),0 12px 40px var(--glass-drop),inset 0 0 0 .5px rgba(var(--gloss),calc(var(--gloss-border) * var(--glass-specular)))}
+.group::after,.app-bar::after,#sheet::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;opacity:var(--glass-specular);
  background:conic-gradient(from 200deg at 50% 50%,rgba(var(--gloss),0.950) 0deg,rgba(var(--gloss),0.908) 8deg,rgba(var(--gloss),0.790) 16deg,rgba(var(--gloss),0.617) 24deg,rgba(var(--gloss),0.421) 32deg,rgba(var(--gloss),0.240) 40deg,rgba(var(--gloss),0.105) 48deg,rgba(var(--gloss),0.043) 56deg,rgba(var(--gloss),0.040) 64deg,rgba(var(--gloss),0.040) 72deg,rgba(var(--gloss),0.040) 80deg,rgba(var(--gloss),0.040) 88deg,rgba(var(--gloss),0.040) 96deg,rgba(var(--gloss),0.040) 104deg,rgba(var(--gloss),0.040) 112deg,rgba(var(--gloss),0.040) 120deg,rgba(var(--gloss),0.040) 128deg,rgba(var(--gloss),0.040) 136deg,rgba(var(--gloss),0.051) 144deg,rgba(var(--gloss),0.095) 152deg,rgba(var(--gloss),0.169) 160deg,rgba(var(--gloss),0.258) 168deg,rgba(var(--gloss),0.350) 176deg,rgba(var(--gloss),0.428) 184deg,rgba(var(--gloss),0.481) 192deg,rgba(var(--gloss),0.500) 200deg,rgba(var(--gloss),0.474) 208deg,rgba(var(--gloss),0.401) 216deg,rgba(var(--gloss),0.298) 224deg,rgba(var(--gloss),0.188) 232deg,rgba(var(--gloss),0.098) 240deg,rgba(var(--gloss),0.047) 248deg,rgba(var(--gloss),0.040) 256deg,rgba(var(--gloss),0.040) 264deg,rgba(var(--gloss),0.040) 272deg,rgba(var(--gloss),0.040) 280deg,rgba(var(--gloss),0.040) 288deg,rgba(var(--gloss),0.040) 296deg,rgba(var(--gloss),0.040) 304deg,rgba(var(--gloss),0.040) 312deg,rgba(var(--gloss),0.045) 320deg,rgba(var(--gloss),0.161) 328deg,rgba(var(--gloss),0.394) 336deg,rgba(var(--gloss),0.661) 344deg,rgba(var(--gloss),0.871) 352deg,rgba(var(--gloss),0.950) 360deg);
  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
 /* Keep the glass silhouette without continuously filtering the moving backdrop. */
 [data-rendering="performance"] .blob{animation:none}
 [data-rendering="performance"] #wallpaper{filter:none;transition:none}
 [data-rendering="performance"] :is(.glass,#searchInput,#warnBar,#state-overlay){-webkit-backdrop-filter:blur(min(var(--glass-blur),8px));backdrop-filter:blur(min(var(--glass-blur),8px))}
-[data-rendering="performance"] :is(.group,.chip,.icon-btn,#tabbar .bubble){-webkit-backdrop-filter:none;backdrop-filter:none}
+[data-rendering="performance"] :is(.group,.chip,.icon-btn,.app-bar .bubble){-webkit-backdrop-filter:none;backdrop-filter:none}
 [data-rendering="performance"] .group{background-color:rgba(var(--glass-tint-dark),max(var(--glass-opacity),.35))}
 [data-rendering="performance"] :is(.glass,.group){box-shadow:inset 0 1px 0 rgba(var(--gloss),calc(.25 * var(--glass-specular))),0 4px 12px var(--glass-drop-sm);transition:background-color 160ms var(--ease-out)}
-[data-rendering="performance"] :is(.group,#tabbar,#sheet)::after{display:none}
+[data-rendering="performance"] :is(.group,.app-bar,#sheet)::after{display:none}
 [data-rendering="performance"] .skel{animation:none}
+#focusView{display:none;position:fixed;inset:0;z-index:25;padding:18px 16px 14px;gap:14px;flex-direction:column}
+body.focusing #focusView{display:flex}
+body.focusing #app,body.focusing #sheet,body.focusing #sheet-backdrop,body.focusing #wc{display:none}
+body.focusing .blob{animation:none}
+.focus-head{display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:32px}
+.focus-head h1{font-size:.875rem;font-weight:600;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-secondary)}
+.focus-head .icon-btn{width:30px;height:30px;flex-shrink:0}
+.focus-session{text-align:center;flex-shrink:0;padding:2px 0 6px}
+#focusMode{font-size:.6875rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px}
+#focusTimer{font-size:2.5rem;font-weight:300;letter-spacing:.025em;font-variant-numeric:tabular-nums;line-height:1.15}
+#focusDetails{flex:1;min-height:0;overflow:auto;padding:20px;border-radius:24px;overflow-wrap:anywhere;scrollbar-width:thin}
+.focus-task-meta{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:.75rem;color:var(--text-secondary);margin-bottom:10px}
+.focus-task-meta .badge{flex-shrink:0}
+.focus-task-title{font-size:1.25rem;line-height:1.3;letter-spacing:-.02em;margin-bottom:20px}
+.focus-instructions{font-size:.9375rem;line-height:1.6;white-space:pre-wrap}
+#focusDetails h3,#focusDetails h4{font-size:.6875rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px}
+.focus-resources{margin-top:22px}
+.focus-source{display:inline-flex;align-items:center;gap:6px;color:var(--blue);font-size:.8125rem;padding:8px 0;margin-top:12px}
+.focus-source svg{width:14px;height:14px}
+.focus-actions{flex-shrink:0;width:100%;align-self:center;user-select:none}
+.focus-action:hover,.focus-action[aria-pressed="true"]{color:var(--text)}
+.focus-action>.bubble{display:block;inset:0;width:auto;opacity:0;transition:opacity 120ms var(--ease-out);pointer-events:none}
+.focus-action[aria-pressed="true"]>.bubble{opacity:1}
+.focus-action>svg,.focus-action>span:not(.bubble){position:relative;z-index:1}
+body.focusing .focus-action{transition:transform 140ms var(--ease-out),color 140ms var(--ease-out)}
+body.focusing .focus-action:not(:disabled):focus-visible>.bubble{opacity:1}
+@media (hover:hover) and (pointer:fine){
+body.focusing .focus-action:not(:disabled):hover{transform:translateY(-1px) scale(1.03)}
+body.focusing .focus-action:not(:disabled):hover>.bubble{opacity:1}
+}
+body.focusing .focus-action:not(:disabled):active{transform:scale(.96);transition-duration:60ms}
+body.focusing .focus-action:not(:disabled):active>.bubble{opacity:1;transition-duration:0s}
+body.focusing.reduce-motion .focus-action{transform:none !important;transition:none}
+body.focusing.reduce-motion .focus-action>.bubble{transition:none}
+@media (prefers-reduced-motion:reduce){body.focusing .focus-action{transform:none !important;transition:none}body.focusing .focus-action>.bubble{transition:none}}
+.focus-actions .focus-action:disabled{opacity:1;color:var(--green);cursor:default}
+.focus-actions .focus-action:disabled:hover{background:none}
+#focusStatus{font-size:.75rem;line-height:1.4;color:var(--text-secondary);flex-shrink:0;text-align:center}
+#focusStatus:empty{display:none}
+@media (max-height:460px){#focusView{gap:10px;padding:12px}.focus-session{padding:0}#focusTimer{font-size:2rem}#focusDetails{padding:16px}.focus-task-title{margin-bottom:14px}}
+@media (prefers-reduced-motion:reduce){.task-focus,.focus-actions .focus-action{transition:none}.focus-actions .focus-action:active{transform:none}}
 </style>
 </head>
 <body>
 
 <div id="wallpaper"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div><div class="blob b5"></div></div>
+<section id="focusView" aria-label="Task focus">
+<div class="focus-head pywebview-drag-region"><h1 id="focusTitle">Focus</h1><button class="icon-btn" id="focusMinimize" aria-label="Minimize">&#8722;</button></div>
+<div class="focus-session"><p id="focusMode">Focused time</p><div id="focusTimer" role="timer" aria-label="Focus time">00:00:00</div></div>
+<div id="focusDetails" class="glass" tabindex="0" aria-label="Task instructions"></div>
+<p id="focusStatus" role="status" aria-live="polite"></p>
+<nav class="focus-actions app-bar glass" aria-label="Focus actions"><button class="focus-action" id="focusPause">Pause</button><button class="focus-action" id="focusTop" aria-label="Keep on top" aria-pressed="false">On top</button><button class="focus-action" id="focusComplete" aria-label="Mark complete">Done</button><button class="focus-action" id="focusEnd" aria-label="Exit focus">Exit</button></nav></section>
 
 <div id="wc">
   <button class="wc-btn" id="wcMin" aria-label="Minimize"></button>
@@ -453,7 +512,7 @@ html[data-text="l"]{font-size:115%}
   </div>
   <main id="scroll"></main>
 
-  <nav id="tabbar" class="glass">
+  <nav id="tabbar" class="app-bar glass">
     <div class="bubble" id="bubble"></div>
     <button class="tab active" data-tab="todo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>To-Do</span>
@@ -578,6 +637,9 @@ function isOverdue(t){ return daysBetween(TODAY, t.due_date) < 0; }
 function isMissed(t, completed){ return completed.indexOf(t.id)===-1 && isOverdue(t) && daysBetween(TODAY, t.due_date) >= -7; }
 
 var ICON = {
+  focus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/><circle cx="12" cy="12" r="3"/></svg>',
+  pause:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="m8 4 12 8-12 8z"/></svg>',
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   ai:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>',
   ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
@@ -665,6 +727,7 @@ function matchEvent(ev){
 }
 function noMatches(){ return empty("No matches", "Nothing matches &ldquo;"+esc(searchQuery.trim())+"&rdquo;.", ICON.search); }
 
+function canFocus(type){return !/\b(meenemen|meebrengen|meebreng|herinnering|herinneringen|reminder|reminders|materiaal|materialen)\b|^ME$/i.test(String(type||'').normalize('NFKC').trim());}
 function taskRow(t, completed){
   var done = completed.indexOf(t.id)!==-1, pinned = PINNED.indexOf(t.id)!==-1;
   var extras = (t.attachments && t.attachments.length ? '<span style="color:var(--text-tertiary)">&middot;</span><span>'+ICON.clip+t.attachments.length+'</span>' : "")+
@@ -677,7 +740,8 @@ function taskRow(t, completed){
     (infoText(t) ? '<div class="task-info">'+esc(infoText(t))+'</div>' : "")+
     (NOTES[t.id] ? '<div class="task-note">'+ICON.note+esc(NOTES[t.id])+'</div>' : "")+
     '<div class="task-meta"><span>'+relLabel(t.due_date)+'</span><span style="color:var(--text-tertiary)">&middot;</span><span>posted '+fmtDate(t.posted_date)+'</span>'+extras+'</div></div>'+
-    '<button class="task-pin'+(pinned?" on":"")+'" data-pin="'+esc(t.id)+'" aria-label="'+(pinned?"Unpin":"Pin")+'" title="'+(pinned?"Unpin":"Pin to top")+'">'+ICON.pin+'</button></div>';
+    '<div class="task-row-actions">'+(canFocus(t.type)?'<button class="task-focus" data-focus-id="'+esc(t.id)+'" aria-label="Focus on '+esc(t.description)+'" title="Focus">'+ICON.focus+'</button>':'')+
+    '<button class="task-pin'+(pinned?" on":"")+'" data-pin="'+esc(t.id)+'" aria-label="'+(pinned?"Unpin":"Pin")+'" title="'+(pinned?"Unpin":"Pin to top")+'">'+ICON.pin+'</button></div></div>';
 }
 
 function infoText(t){ return t && t.body && t.body.trim() && t.body.trim()!==(t.description||"").trim() ? t.body.trim() : ""; }
@@ -911,9 +975,9 @@ function flushNote(){
   }
 }
 
-function openTask(id){
+function openTask(id, focus){
   var t = DATA.todos.filter(function(x){ return x.id===id; })[0], lesson = null, day = null;
-  if (!t) DATA.days.forEach(function(d){ d.events.forEach(function(ev){ if (ev.info) ev.info.assignments.forEach(function(a){ if (a.id===id && !t) { t=a; lesson=ev; day=d; } }); }); });
+  if (!t) DATA.days.concat(DATA.all_classes||[]).forEach(function(d){ d.events.forEach(function(ev){ if (ev.info) ev.info.assignments.forEach(function(a){ if (a.id===id && !t) { t=a; lesson=ev; day=d; } }); }); });
   if (!t) return;
   var link = lesson ? deepLink(lesson, day.date) : deepLink(t, t.posted_date);
   var pairs = [["Course",t.course||(lesson&&lesson.course)],["Type",t.type],["Posted",t.posted_date?fmtLong(t.posted_date):"-"],["Due",t.due_date ? fmtLong(t.due_date)+" ("+relLabel(t.due_date)+")" : "-"]];
@@ -924,9 +988,92 @@ function openTask(id){
     (infoText(t) ? '<div class="detail-block"><h4>Info voor de leerling</h4><div class="detail-info">'+esc(infoText(t))+'</div></div>' : "")+
     linksBlock(t)+noteBlock(t.id)+
     '<div class="detail-block"><h4>Details</h4><div class="detail-list">'+rows(pairs)+'</div></div>'+
-    extraBlock(t.detail_fields)+pinButton(t.id)+linkButton(link);
-  showSheet((t.course||(lesson&&lesson.course)||"Task")+" - "+(t.type||"Task"), body, link);
+    extraBlock(t.detail_fields);
+  var title = (t.course||(lesson&&lesson.course)||"Task")+" - "+(t.type||"Task");
+  var focusBody = '<div class="focus-task-meta"><span class="badge">'+esc(t.type||'Task')+'</span><span>'+(t.due_date?'Due '+esc(relLabel(t.due_date)):'')+'</span></div><h2 class="focus-task-title">'+esc(t.description)+'</h2>'+
+    (infoText(t)?'<h3>Instructions</h3><div class="focus-instructions">'+esc(infoText(t))+'</div>':'')+
+    ((t.attachments||[]).length||(t.weblinks||[]).length?'<div class="focus-resources">'+linksBlock(t)+'</div>':'')+
+    (link?'<button class="focus-source" data-external="1">'+ICON.ext+' Open in Smartschool</button>':'');
+  focusCandidate = {id:t.id,title:title,body:focusBody,link:link};
+  if (focus) {if (canFocus(t.type)) focusAction('start'); return;}
+  showSheet(title, body+'<div class="task-actions">'+pinButton(t.id)+(canFocus(t.type)?'<button class="btn-secondary" data-focus-task="1">'+ICON.focus+' Focus</button>':'')+'</div>'+linkButton(link), link);
 }
+
+/* Desktop session state survives the page reload performed by sync. */
+var focusCandidate = null, focusSession = null, focusTick = null, focusStamp = 0, focusBusy = false;
+function focusClock(){
+  if (!focusSession) return;
+  var seconds = Math.floor(focusSession.elapsed+(focusSession.running?(performance.now()-focusStamp)/1000:0));
+  document.getElementById('focusTimer').textContent = [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(function(n){return String(n).padStart(2,'0');}).join(':');
+}
+function showFocus(state){
+  if (!state) return;
+  var entering = !focusSession;
+  focusSession = state; focusStamp = performance.now();
+  if (entering) {
+    hideSheet(); document.body.classList.add('focusing'); document.getElementById('app').setAttribute('inert','');
+    document.getElementById('focusTitle').textContent = state.task.title;
+    document.getElementById('focusDetails').innerHTML = state.task.body;
+    document.getElementById('focusStatus').textContent = '';
+    document.getElementById('focusPause').focus();
+  }
+  document.getElementById('focusPause').innerHTML = '<span class="bubble" aria-hidden="true"></span>'+(state.running?ICON.pause:ICON.play)+'<span>'+(state.running?'Pause':'Resume')+'</span>';
+  document.getElementById('focusPause').setAttribute('aria-pressed',!state.running);
+  document.getElementById('focusMode').textContent = state.running?'Focused time':'Paused';
+  document.getElementById('focusTop').setAttribute('aria-pressed',!!state.onTop);
+  document.getElementById('focusComplete').disabled = COMPLETED.indexOf(state.task.id)!==-1;
+  lensScan();
+  clearInterval(focusTick); focusClock(); if (state.running) focusTick = setInterval(focusClock,1000);
+}
+async function focusAction(action){
+  if (focusBusy) return;
+  focusBusy = true;
+  try {
+    var api = bridge();
+    if (action === 'start') {
+      flushNote(); showFocus(api?await api.focus_start(focusCandidate):{task:focusCandidate,elapsed:0,running:true,onTop:false});
+    } else if (action === 'pause') {
+      if (api) showFocus(await api.focus_pause());
+      else {var state = Object.assign({},focusSession); state.elapsed += state.running?(performance.now()-focusStamp)/1000:0; state.running = !state.running; showFocus(state);}
+    } else if (action === 'top') {
+      if (!api) throw new Error('Keep on top is available in the desktop app.');
+      if (!await api.focus_on_top(!focusSession.onTop)) throw new Error('Could not change window position.');
+      focusSession.onTop = !focusSession.onTop; document.getElementById('focusTop').setAttribute('aria-pressed',focusSession.onTop);
+      lensScan();
+    } else if (action === 'complete') {
+      var id = focusSession.task.id;
+      if (api && !await api.mark_task(id,true)) throw new Error('Could not save completion.');
+      if (COMPLETED.indexOf(id)===-1) COMPLETED.push(id);
+      if (!api) localStorage.setItem('planner.completed',JSON.stringify(COMPLETED));
+      document.getElementById('focusComplete').disabled = true;
+      document.getElementById('focusStatus').textContent = 'Task marked complete. You can continue focusing or exit.';
+    } else if (action === 'end') {
+      if (api && !await api.focus_end()) throw new Error('Could not restore the window. Please try again.');
+      clearInterval(focusTick); focusSession = null; document.body.classList.remove('focusing');
+      document.getElementById('app').removeAttribute('inert'); render(DATA,COMPLETED,{keepScroll:true}); document.getElementById('settingsBtn').focus();
+    }
+  } catch(e) {
+    if (focusSession) document.getElementById('focusStatus').textContent = e.message||'Focus action failed. Please try again.';
+    else showToast('Could not start Focus. Please try again.');
+  } finally {focusBusy = false;}
+}
+document.getElementById('focusPause').onclick = function(){focusAction('pause');};
+document.getElementById('focusTop').onclick = function(){focusAction('top');};
+document.getElementById('focusComplete').onclick = function(){focusAction('complete');};
+document.getElementById('focusTop').innerHTML = '<span class="bubble" aria-hidden="true"></span>'+ICON.pin+'<span>On top</span>';
+document.getElementById('focusComplete').innerHTML = '<span class="bubble" aria-hidden="true"></span>'+ICON.ok+'<span>Done</span>';
+document.getElementById('focusEnd').innerHTML = '<span class="bubble" aria-hidden="true"></span>'+ICON.ext+'<span>Exit</span>';
+document.getElementById('focusEnd').onclick = function(){focusAction('end');};
+document.getElementById('focusMinimize').onclick = function(){winCall('win_minimize');};
+document.getElementById('focusDetails').onclick = function(e){
+  var link = e.target.closest('[data-open-url]');
+  if (link) openExternal(link.getAttribute('data-open-url'));
+  else if (e.target.closest('[data-external]')) {sheetLink = focusSession.task.link; openSmartschool();}
+};
+async function restoreFocusSession(){
+  try {var api = bridge(); if (api) showFocus(await api.focus_state());} catch(e) {showToast('Could not restore Focus. Reload or restart the app.');}
+}
+window.addEventListener('pywebviewready',restoreFocusSession);
 
 function openLesson(mid){
   var ev = null, day = null;
@@ -1086,7 +1233,7 @@ function closeSheetNotice(){
   return false;
 }
 function canShowNotice(){
-  return !(BOOT && BOOT.chooseRendering) && (!EMBEDDED || bridge()) && !sheetEl.classList.contains("show") && !document.getElementById("state-overlay").classList.contains("show");
+  return !(typeof focusSession !== 'undefined' && focusSession) && !(BOOT && BOOT.chooseRendering) && (!EMBEDDED || bridge()) && !sheetEl.classList.contains("show") && !document.getElementById("state-overlay").classList.contains("show");
 }
 function showUpdatePrompt(info){
   if (sheetNotice && sheetNotice.kind !== "update") return false;
@@ -1270,6 +1417,7 @@ function applyGlassLevel(level){
 
 /* ===== LOADING / ERROR ===== */
 function showLoading(label){
+  if (focusSession) {document.getElementById('focusStatus').textContent = label||'Syncing...'; return;}
   document.getElementById("stateContent").innerHTML = '<div class="state-spinner"></div><div style="font-size:17px;font-weight:600">'+esc(label||"Syncing...")+'</div><div class="skeleton-group"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   var ov0 = document.getElementById("state-overlay");
   ov0.setAttribute("role","status"); ov0.removeAttribute("aria-modal"); ov0.removeAttribute("aria-labelledby");
@@ -1420,6 +1568,8 @@ document.addEventListener("keydown", function(e){ if (e.key==="Escape") hideShee
 
 function openSmartschool(){ var url = sheetLink || (DATA.main_url ? "https://" + DATA.main_url + "/planner" : null); if (url) openExternal(url); }
 document.getElementById("scroll").addEventListener("click", function(e){
+  var focus = e.target.closest('[data-focus-id]');
+  if (focus) {e.stopPropagation(); openTask(focus.dataset.focusId,true); return;}
   if (e.target.closest("[data-sync-now]")) { syncNow(); return; }
   var pin = e.target.closest("[data-pin]");
   if (pin) { e.stopPropagation(); togglePin(pin.dataset.pin); render(DATA, COMPLETED, { keepScroll: true }); return; }
@@ -1442,6 +1592,7 @@ document.getElementById("sheetBody").addEventListener("input", function(e){
   noteTimer = setTimeout(flushNote, 500);
 });
 document.getElementById("sheetBody").addEventListener("click", function(e){
+  if (e.target.closest('[data-focus-task]')) {focusAction('start'); return;}
   var ou = e.target.closest("[data-open-url]"); if (ou) { openExternal(ou.getAttribute("data-open-url")); return; }
   var ps = e.target.closest("[data-pin-sheet]");
   if (ps) {
@@ -1494,7 +1645,8 @@ Array.prototype.forEach.call(document.querySelectorAll(".grip"), function(grip){
     if (!api || ev.button !== 0) return;
     ev.preventDefault();
     var edge = grip.getAttribute("data-edge"), sx = ev.screenX, sy = ev.screenY;
-    var dx = 0, dy = 0, start = null, busy = false, lastW = 0, lastH = 0, MIN_W = 760, MIN_H = 560;
+    var compact = !!focusSession;
+    var dx = 0, dy = 0, start = null, busy = false, lastW = 0, lastH = 0, MIN_W = compact?360:760, MIN_H = compact?420:560;
     try { grip.setPointerCapture(ev.pointerId); } catch(e){}
     Promise.resolve(api.win_size()).then(function(sz){ start = sz; lastW = sz.w; lastH = sz.h; flush(); });
     function flush(){
@@ -1567,7 +1719,7 @@ function lensFilterId(w, h, r){
   LENS.defs.appendChild(holder.firstChild);
   LENS.cache[key] = id; return id;
 }
-var LENS_SEL = [["#tabbar", .6], [".chip", .5], [".icon-btn", .45], ["#sheet", .7], ["#tabbar .bubble", .2]];
+var LENS_SEL = [[".app-bar", .6], [".chip", .5], [".icon-btn", .45], ["#sheet", .7], [".app-bar .bubble", .2]];
 function lensMeasure(el){
   var w = el.offsetWidth, h = el.offsetHeight;
   if (el.__r === undefined) el.__r = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
@@ -1642,6 +1794,7 @@ lensScan();
   }
   if (loadSetting("animatedBg") === false) document.body.classList.add("static-bg");
   applyScheme();
+  restoreFocusSession();
   if (BOOT && BOOT.mode === "loading") { showLoading(BOOT.label); return; }
   if (BOOT && BOOT.mode === "error") { showError(BOOT.error || BOOT.message); return; }
   render(DATA, COMPLETED);

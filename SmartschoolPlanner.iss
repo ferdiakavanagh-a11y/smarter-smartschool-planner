@@ -28,7 +28,7 @@ CloseApplications=yes
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
-Source: "{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\SmartschoolPlanner\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 

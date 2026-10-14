@@ -6,7 +6,6 @@ import sys
 import threading
 import time
 import traceback
-import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,14 +26,10 @@ sys.path.insert(0, str(ROOT))
 
 import json  # noqa: E402
 import os  # noqa: E402
-import subprocess  # noqa: E402
 from datetime import datetime  # noqa: E402
 
-import app_errors  # noqa: E402
 import planner_html  # noqa: E402
-import sync  # noqa: E402
 import task_state  # noqa: E402
-import updater  # noqa: E402
 import webview  # noqa: E402
 from version import __version__, RELEASE_NOTES  # noqa: E402
 from webview.window import FixPoint  # noqa: E402
@@ -83,6 +78,9 @@ class Api:
         self._closed = threading.Event()
         self._update_lock = threading.Lock()
         self._settings_lock = threading.Lock()
+        self._focus_lock = threading.Lock()
+        self._focus = None
+        self._focus_bounds = None
 
     # window controls
     def win_close(self):
@@ -112,8 +110,86 @@ class Api:
         """Resize to width x height, keeping the opposite edge fixed."""
         edge = str(edge)
         fix = (FixPoint.EAST if "w" in edge else FixPoint.WEST) | (FixPoint.SOUTH if "n" in edge else FixPoint.NORTH)
-        self._window.resize(max(MIN_WIDTH, int(width)), max(MIN_HEIGHT, int(height)), fix)
+        minimum = (360, 420) if self._focus else (MIN_WIDTH, MIN_HEIGHT)
+        self._window.resize(max(minimum[0], int(width)), max(minimum[1], int(height)), fix)
         return True
+
+    def _focus_minimum(self, width, height):
+        if os.name == 'nt':
+            from System import Action
+            from System.Drawing import Size
+            form = self._window.native
+            def apply():
+                scale = form.DeviceDpi / 96
+                form.MinimumSize = Size(round(width * scale), round(height * scale))
+            form.Invoke(Action(apply))
+
+    def focus_state(self):
+        with self._focus_lock:
+            return self._focus_state()
+
+    def _focus_state(self):
+        if self._focus is None:
+            return None
+        state = dict(self._focus)
+        if state['running']:
+            state['elapsed'] += time.monotonic() - state['started']
+        del state['started']
+        return state
+
+    def focus_start(self, task):
+        with self._focus_lock:
+            if self._focus:
+                return self._focus_state()
+            if not isinstance(task, dict) or not all(isinstance(task.get(k), str) for k in ('id', 'title', 'body')):
+                raise ValueError('Invalid focus task')
+            window = self._window
+            maximized = self._maximized
+            if maximized:
+                window.restore()
+            self._focus_bounds = (window.x, window.y, window.width, window.height, maximized, window.on_top)
+            try:
+                self._focus_minimum(360, 420)
+                window.resize(420, 560)
+            except Exception:
+                self._focus_minimum(MIN_WIDTH, MIN_HEIGHT)
+                if maximized:
+                    window.maximize()
+                self._focus_bounds = None
+                raise
+            self._focus = {'task': task, 'elapsed': 0, 'running': True, 'started': time.monotonic(), 'onTop': bool(window.on_top)}
+            return self._focus_state()
+
+    def focus_pause(self):
+        with self._focus_lock:
+            if not self._focus:
+                return None
+            self._focus['elapsed'] = self._focus_state()['elapsed']
+            self._focus['running'] = not self._focus['running']
+            self._focus['started'] = time.monotonic()
+            return self._focus_state()
+
+    def focus_on_top(self, enabled):
+        with self._focus_lock:
+            if not self._focus:
+                return False
+            self._window.on_top = bool(enabled)
+            self._focus['onTop'] = bool(enabled)
+            return True
+
+    def focus_end(self):
+        with self._focus_lock:
+            if self._focus_bounds:
+                x, y, width, height, maximized, on_top = self._focus_bounds
+                self._window.restore()
+                self._window.on_top = on_top
+                self._focus_minimum(MIN_WIDTH, MIN_HEIGHT)
+                self._window.resize(width, height)
+                self._window.move(x, y)
+                if maximized:
+                    self._window.maximize()
+            self._focus = self._focus_bounds = None
+            return True
 
     # internals (hidden from the JS bridge)
     def _limit_maximize_to_work_area(self):
@@ -173,6 +249,7 @@ class Api:
         return True
 
     def _run_setup(self):
+        import subprocess
         before = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--setup-only"]
@@ -198,6 +275,7 @@ class Api:
         return True
 
     def acknowledge_update(self, version):
+        import updater
         if str(version) != __version__ or not self._release_notes:
             return False
         try:
@@ -219,6 +297,7 @@ class Api:
         threading.Thread(target=self._check_for_update, daemon=True).start()
 
     def _check_for_update(self):
+        import updater
         if "--updated" in sys.argv:
             try:
                 updater.prepare_installed_notice(ROOT, __version__, RELEASE_NOTES)
@@ -266,6 +345,7 @@ class Api:
             pass
 
     def _do_update(self):
+        import updater
         with self._update_lock:
             if not self._update or self._update_busy:
                 return
@@ -296,6 +376,7 @@ class Api:
         return True
 
     def open_external(self, url):
+        import webbrowser
         url = str(url)
         if not url.startswith(("https://", "http://")):  # http/https only
             return False
@@ -326,6 +407,7 @@ api = Api()
 
 
 def do_sync_and_render(window):
+    import app_errors
     try:
         # spinner overlay, no reload flash
         try:
@@ -346,6 +428,7 @@ def do_sync_and_render(window):
             )
             return
 
+        import sync
         data = sync.run(days_back=10, days_ahead=21)
         completed = task_state.load_completed_ids(ROOT)
         html = planner_html.render_html(
