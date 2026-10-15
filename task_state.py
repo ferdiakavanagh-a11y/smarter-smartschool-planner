@@ -55,9 +55,32 @@ def load_settings(root: Path) -> dict:
         return {}
 
 
+def date_checker_mode(root: Path, gemini_key) -> str:
+    if not str(gemini_key or '').strip():
+        return 'local'
+    return 'local' if load_settings(root).get('dateChecker') == 'local' else 'gemini'
+
+
+def date_checker_state(root: Path) -> dict:
+    import yaml
+    try:
+        credentials = yaml.safe_load((root / 'credentials.yml').read_text(encoding='utf-8')) or {}
+    except FileNotFoundError:
+        credentials = {}
+    except yaml.YAMLError as exc:
+        raise ValueError('Could not read login settings') from exc
+    key = credentials.get('gemini_api_key') if isinstance(credentials, dict) else None
+    return {'mode': date_checker_mode(root, key), 'geminiAvailable': bool(str(key or '').strip())}
+
+
 def set_setting(root: Path, key: str, value) -> dict:
     if key == "renderingMode" and value not in ("performance", "fancy"):
         raise ValueError("Unknown rendering mode")
+    if key == 'dateChecker':
+        if value not in ('local', 'gemini'):
+            raise ValueError('Unknown date checker')
+        if value == 'gemini' and not date_checker_state(root)['geminiAvailable']:
+            raise ValueError('A Gemini API key is required')
     settings = load_settings(root)
     settings[key] = value
     path = _settings_path(root)

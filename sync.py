@@ -21,14 +21,23 @@ from smartschool import (
     SmartschoolMomentInfos,
 )
 
+try:
+    from smartschool import ApplicableAssignmentTypes
+except ImportError:
+    ApplicableAssignmentTypes = None
+
+try:
+    from smartschool import StudentNotes, StudentNoteDetails, StudentAbsences
+except ImportError:  # Older source-run environments must still be able to sync the planner.
+    StudentNotes = StudentNoteDetails = StudentAbsences = None
+
 from dutch_dates import resolve_due_date
 import gemini_dates
 import planner_details
 import app_errors
+import task_state
 
-# Free regex deadline parser (dutch_dates.py): off, the AI pass replaces it. True = run it first.
-USE_REGEX_DEADLINE_PARSER = False
-_regex_active = USE_REGEX_DEADLINE_PARSER  # set per sync in run(): also on when no Gemini key is set
+_regex_active = False  # resolved from the saved choice and key at the start of each sync
 
 
 def get_root() -> Path:
@@ -545,7 +554,7 @@ def build_future_tasks(session: Smartschool, pending: list[dict]) -> tuple[list[
 def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> dict | None:
     """One batched AI call for unresolved items; patches registered dicts in place.
     Returns a warning dict (see app_errors.gemini_warning) if Gemini had a problem, else None."""
-    if not pending:
+    if _regex_active or not pending:
         return None
 
     if not gemini_api_key:
@@ -645,6 +654,64 @@ def fetch_results(session: Smartschool, max_pages: int = 4) -> tuple[list[dict],
     return out, ""
 
 
+def fetch_assignment_types(session) -> list[dict]:
+    if ApplicableAssignmentTypes is None:
+        return []
+    try:
+        return [{'id': str(t.id), 'name': t.name, 'abbreviation': t.abbreviation,
+                 'visible': t.is_visible} for t in ApplicableAssignmentTypes(session)]
+    except Exception:  # Optional metadata must not stop a planner sync.
+        return []
+
+
+def lvs_since() -> date:
+    today = date.today()
+    return date(today.year if today.month >= 9 else today.year - 1, 9, 1)
+
+
+def fetch_lvs(session) -> dict:
+    """Optional, current-school-year overview. Never log personal LVS content."""
+    since = lvs_since()
+    until = date(since.year + 1, 8, 31)
+    output = {'notes': [], 'absences': [], 'notes_error': '', 'absences_error': '', 'since': since.isoformat()}
+    if StudentNotes is None or StudentAbsences is None:
+        output['notes_error'] = output['absences_error'] = 'LVS requires smartschool 0.12.0 or newer. Update the app dependencies and restart.'
+        return output
+    try:
+        for note in StudentNotes(session, since=since, until=until):
+            if note.private:
+                continue
+            output['notes'].append({'id': str(note.item_id), 'title': note.title, 'category': note.cat_name,
+                                    'date': note.date.isoformat() if note.date else '', 'author': note.author})
+    except Exception:  # optional school/account permissions and network failures
+        output['notes_error'] = 'Notes could not be loaded. Your school may not enable LVS access for this account. Try syncing again.'
+    try:
+        for absence in StudentAbsences(session, since=since, until=until):
+            output['absences'].append({'id': str(absence.absent_id), 'date': absence.date.isoformat() if absence.date else '',
+                                       'code': absence.code, 'description': absence.description,
+                                       'part': str(absence.part_of_day or ''), 'info': absence.info})
+    except Exception:
+        output['absences_error'] = 'Absences could not be loaded. Access may be unavailable for this account. Try syncing again.'
+    for key in ('notes', 'absences'):
+        output[key].sort(key=lambda item: item['date'], reverse=True)
+    return output
+
+
+def fetch_lvs_note_detail(session, item_id: str) -> dict:
+    if StudentNotes is None or StudentNoteDetails is None:
+        raise RuntimeError('LVS requires smartschool 0.12.0 or newer')
+    # Recheck visibility: a cached header must not grant access to a withdrawn/private note.
+    since = lvs_since()
+    if not any(str(note.item_id) == item_id and not note.private for note in StudentNotes(session, since=since, until=date(since.year + 1, 8, 31))):
+        raise ValueError('Note is no longer available')
+    detail = StudentNoteDetails(session, item_id=int(item_id)).get()
+    if detail is None:
+        raise ValueError('No note content')
+    return {'text': detail.text, 'choice': detail.choice, 'fields': detail.fields,
+            'date': detail.date.isoformat() if detail.date else '',
+            'attachments': [{'name': attachment.file_name} for attachment in detail.attachments]}
+
+
 def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
@@ -652,9 +719,9 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     creds = PathCredentials(str(ROOT / "credentials.yml"))
     session = Smartschool(creds)
     other_info = creds.other_info or {}
-    gemini_api_key = other_info.get("gemini_api_key") or None
+    gemini_api_key = str(other_info.get("gemini_api_key") or '').strip() or None
     global _regex_active
-    _regex_active = USE_REGEX_DEADLINE_PARSER or not gemini_api_key  # no AI key -> built-in parser
+    _regex_active = task_state.date_checker_mode(ROOT, gemini_api_key) == 'local'
     detail_url_override = other_info.get("planner_detail_url") or None
 
     main_url = str(getattr(creds, "main_url", "") or "")
@@ -803,6 +870,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
 
     print("Fetching grades...")
     results, results_note = fetch_results(session)
+    lvs = fetch_lvs(session)
+    assignment_types = fetch_assignment_types(session)
 
     output = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -815,6 +884,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "all_classes": all_classes,
         "results": results,
         "results_note": results_note,
+        "lvs": lvs,
+        "assignment_types": assignment_types,
         "warnings": warnings,
         "diagnostics": {
             "regex_parser_enabled": _regex_active,

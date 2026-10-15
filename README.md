@@ -86,10 +86,29 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 - **Rendering modes** - choose **Performance** for weaker laptops: light frosted
   glass, simpler shadows, and a still colored background. **Fancy** keeps full
   glass refraction and optional background animation. Switch modes in Settings.
+- **Date checker** - choose **Local** or **Gemini** in Settings for the next sync.
+  Local uses the built-in Python parser without Gemini requests. Without a Gemini
+  API key, Local is always used. **Change login info** opens the existing editor
+  for your school login details and optional Gemini key.
 - **Task focus** - open a task's details and choose **Focus** for a compact,
   resizable window with instructions, links, a stopwatch, pause/resume, and optional
   keep on top. Reminder types such as Meebrengen are excluded. Exit restores your
   window; marking complete is separate. Sessions survive sync, but end when the app closes.
+- **LVS** - a separate tab shows this school year's available pupil-follow-up
+  notes and absences. Open a note to fetch its full text and additional fields.
+  Unread items have a small red dot; opening an item clears it. The LVS tab
+  keeps its dot until all items are read. Read status is saved per account and
+  school year; existing items initially count as unread.
+  **Mark all as read** clears all synced items, including those hidden by search.
+  Note details require an internet connection; attachment downloads open in
+  Smartschool. Private records are excluded, and unavailable access never blocks
+  planner syncing. Requires `smartschool` 0.12.0 or newer.
+- **Task type filters** - filter Planner and Missed by your school's assignment
+  types. Names and abbreviations match the same type; cached task types remain
+  available if school metadata cannot be loaded. Combine with search and the
+  Planner's course filter.
+  The glass dropdown supports keyboard navigation and typing to find a type,
+  with a staggered reveal in Fancy mode and instant opening in Performance mode.
 - **Native-feeling window** - a frameless window with its own minimise /
   maximise / close buttons and drag-to-resize. Maximising stays inside the
   taskbar, and Windows 11 rounded corners are used where available.

@@ -375,6 +375,18 @@ class Api:
         task_state.set_task_done(ROOT, task_id, bool(done))
         return True
 
+    def lvs_note_detail(self, note_id):
+        note_id = str(note_id)
+        try:
+            data = json.loads(DATA_FILE.read_text(encoding='utf-8'))
+            if not any(str(note.get('id')) == note_id for note in data.get('lvs', {}).get('notes', [])):
+                return {'error': 'This note is not available. Sync LVS and try again.'}
+            import sync
+            session = sync.Smartschool(sync.PathCredentials(str(CREDS_FILE)))
+            return sync.fetch_lvs_note_detail(session, note_id)
+        except Exception:
+            return {'error': 'Could not load this note. Check your connection and LVS access, then try again.'}
+
     def open_external(self, url):
         import webbrowser
         url = str(url)
@@ -401,6 +413,12 @@ class Api:
         except (OSError, ValueError):
             return False
         return True
+
+    def date_checker_state(self):
+        try:
+            return task_state.date_checker_state(ROOT)
+        except (OSError, ValueError):
+            return {'error': 'Could not read login settings. Use Change login info to check them.'}
 
 
 api = Api()
