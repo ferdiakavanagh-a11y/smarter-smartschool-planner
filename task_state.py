@@ -5,7 +5,34 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
+from functools import wraps
 from pathlib import Path
+
+_state_lock = threading.RLock()
+
+
+def state_write(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _state_lock:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def _atomic_json(path: Path, data) -> None:
+    path.parent.mkdir(exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as file:
+            temporary = Path(file.name)
+            json.dump(data, file, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _file_path(root: Path) -> Path:
@@ -28,6 +55,7 @@ def save_completed_ids(root: Path, ids: set[str]) -> None:
     path.write_text(json.dumps(sorted(ids)), encoding="utf-8")
 
 
+@state_write
 def set_task_done(root: Path, task_id: str, done: bool) -> set[str]:
     ids = load_completed_ids(root)
     if done:
@@ -114,6 +142,7 @@ def load_pinned_ids(root: Path) -> list[str]:
         return []
 
 
+@state_write
 def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
     ids = [i for i in load_pinned_ids(root) if i != task_id]
     if pinned:
@@ -132,6 +161,7 @@ def load_notes(root: Path) -> dict[str, str]:
         return {}
 
 
+@state_write
 def set_note(root: Path, task_id: str, text: str) -> dict[str, str]:
     notes = load_notes(root)
     text = (text or "").strip()
@@ -143,3 +173,22 @@ def set_note(root: Path, task_id: str, text: str) -> dict[str, str]:
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(notes, ensure_ascii=False), encoding="utf-8")
     return notes
+
+
+@state_write
+def migrate_task_ids(root: Path, aliases: dict) -> None:
+    """Copy state to merged IDs; retain originals so interrupted migrations are recoverable."""
+    aliases = {old: new for old, new in aliases.items() if old != new}
+    if not aliases:
+        return
+    completed, pinned, notes = load_completed_ids(root), load_pinned_ids(root), load_notes(root)
+    for old, new in aliases.items():
+        if old in completed:
+            completed.add(new)
+        if old in pinned and new not in pinned:
+            pinned.append(new)
+        if notes.get(old) and notes[old] not in notes.get(new, ''):
+            notes[new] = (notes[new] + '\n\n' + notes[old]) if notes.get(new) else notes[old]
+    _atomic_json(_file_path(root), sorted(completed))
+    _atomic_json(_pinned_path(root), pinned)
+    _atomic_json(_notes_path(root), notes)

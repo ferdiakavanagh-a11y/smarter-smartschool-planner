@@ -6,8 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
+import threading
+from functools import wraps
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -39,6 +43,60 @@ import credential_store
 from version import __version__
 
 _regex_active = False  # resolved from the saved choice and key at the start of each sync
+_run_lock = threading.Lock()
+
+
+class TimeoutSmartschool(Smartschool):
+    def _make_traced_request(self, request_method, method, url, **kwargs):
+        # This also covers the library's login/MFA requests, which bypass request().
+        kwargs.setdefault('timeout', (10, 30))
+        return super()._make_traced_request(request_method, method, url, **kwargs)
+
+
+def serial_sync(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _run_lock:
+            if os.name != 'nt':
+                return function(*args, **kwargs)
+            import ctypes
+            from ctypes import wintypes
+            api = ctypes.WinDLL('kernel32', use_last_error=True)
+            api.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+            api.CreateMutexW.restype = wintypes.HANDLE
+            api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            api.WaitForSingleObject.restype = wintypes.DWORD
+            api.ReleaseMutex.argtypes = [wintypes.HANDLE]
+            api.CloseHandle.argtypes = [wintypes.HANDLE]
+            name = 'Local\\SmartschoolPlannerSync-' + hashlib.sha256(str(ROOT.resolve()).casefold().encode()).hexdigest()
+            handle = api.CreateMutexW(None, False, name)
+            if not handle:
+                raise OSError('Could not lock planner sync')
+            acquired = False
+            try:
+                acquired = api.WaitForSingleObject(handle, 0xFFFFFFFF) in (0, 0x80)
+                if not acquired:
+                    raise OSError('Could not lock planner sync')
+                return function(*args, **kwargs)
+            finally:
+                if acquired:
+                    api.ReleaseMutex(handle)
+                api.CloseHandle(handle)
+    return wrapped
+
+
+def write_snapshot(path: Path, data: dict) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as file:
+            temporary = Path(file.name)
+            json.dump(data, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def get_root() -> Path:
@@ -129,6 +187,77 @@ def stable_task_id(course: str, type_: str, description: str, due_date: str) -> 
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def assign_task_ids(todos, days, previous, account):
+    """Reuse existing state IDs and keep the mapping after tasks leave the sync window."""
+    path = DATA_DIR / 'task_identities.json'
+    try:
+        registry = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(registry, dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in registry.items()):
+            raise ValueError('Invalid task identity registry')
+    except FileNotFoundError:
+        registry = {}
+    except (ValueError, OSError):
+        raise ValueError('Saved task identities could not be read. Existing planner data was kept.') from None
+
+    def semantic(task):
+        return tuple(str(task.get(k) or '').strip() for k in ('course', 'type', 'description', 'posted_date'))
+
+    def identity(task):
+        server = task.get('source_id')
+        if not server and task.get('element_source') == 'planner_api':
+            server = task.get('moment_id')
+        value = ['server', str(server)] if server else ['content', *semantic(task)]
+        return hashlib.sha256(json.dumps([account, value], ensure_ascii=False).encode('utf-8')).hexdigest()
+
+    old = {}
+    for task in previous.get('todos', []):
+        if task.get('id'):
+            old.setdefault(semantic(task), set()).add(task['id'])
+            registry.setdefault(identity(task), task['id'])
+
+    for task in todos:
+        key = identity(task)
+        candidates = old.get(semantic(task), set())
+        if key not in registry:
+            registry[key] = next(iter(candidates)) if len(candidates) == 1 else key[:24]
+        task['id'] = registry[key]
+
+    merged, cross_source, aliases = {}, {}, {}
+    for task in todos:
+        key = task['id']
+        signature = semantic(task)
+        other = cross_source.get(signature)
+        if other and other['source'] != task.get('source') and ('future_tasks' in (other['source'], task.get('source'))):
+            key = other['id']
+            for old_id in old.get(signature, set()):
+                aliases[old_id] = key
+        if key in merged:
+            aliases[task['id']] = key
+            registry[identity(task)] = key
+            target = merged[key]
+            # Prefer the richer lesson record over the lightweight future-task view.
+            if task.get('source') != 'future_tasks':
+                target.update({k: v for k, v in task.items() if v not in (None, '', [], {}) and k != 'id'})
+            else:
+                for field in ('body', 'attachments', 'weblinks', 'detail_fields'):
+                    if not target.get(field) and task.get(field):
+                        target[field] = task[field]
+            target['id'] = key
+        else:
+            merged[key] = task
+        cross_source.setdefault(signature, merged[key])
+
+    for day in days:
+        for event in day['events']:
+            for assignment in (event.get('info') or {}).get('assignments', []):
+                task = dict(assignment, course=event['course'], posted_date=day['date'],
+                            moment_id=event.get('moment_id'), element_source=event.get('source'))
+                assignment['id'] = registry[identity(task)]
+    task_state.migrate_task_ids(ROOT, aliases)
+    write_snapshot(path, registry)
+    return sorted(merged.values(), key=lambda task: task['due_date'])
+
+
 def _flatten_raw(obj, prefix: str = "") -> list[tuple[str, str]]:
     """Flatten nested JSON into (path, value) pairs of non-empty string/number leaves."""
     out: list[tuple[str, str]] = []
@@ -188,6 +317,9 @@ def parse_planner_records(raw_elements, source: str):
             continue
         status['parsed'] += 1
         yield raw, element
+    if raw_elements and not status['parsed']:
+        status['status'] = 'failed'
+        raise ValueError('All planner records failed validation')
 
 
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([.,]\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
@@ -247,6 +379,7 @@ def fetch_moment_info(
                     "type": a.type,
                     "description": a.description,
                     "info": a.assignment_info,
+                    "body": a.assignment_info or '',
                     "due_date": due_date,
                     "due_date_corrected": corrected,
                     "due_date_source": source,
@@ -354,6 +487,8 @@ def build_lessons_planner_api(
         detail_payload = None
         if detail_fetcher is not None:
             detail_payload = detail_fetcher.fetch(str(pe.id), element_type, posted_date, title)
+        raw = planner_details.public_payload(raw)
+        detail_payload = planner_details.public_payload(detail_payload)
         body_text = planner_details.extract_body(detail_payload, title) if detail_payload else ""
 
         # description stays the title (keeps task ids stable); body is stored separately
@@ -432,7 +567,9 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
     url = f"/planner/api/v1/planned-elements/user/{user_id}"
     base_data = {"from": start_date.isoformat(), "to": cutoff.isoformat()}
 
-    raw_elements = None
+    parsed_elements = []
+    empty_response = False
+    rejected_records = False
     last_exc: Exception | None = None
     # broadest filter first, then the known-working one
     for types_guess in (None, "lessons,planned-assignments,planned-to-dos", "planned-assignments,planned-to-dos"):
@@ -441,19 +578,25 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
             if types_guess is not None:
                 data["types"] = types_guess
             raw_elements = session.json(url, data=data)
-            break
+            parsed_elements = list(parse_planner_records(raw_elements, 'timetable'))
+            _planner_diagnostics['timetable']['filter'] = types_guess or 'all'
+            if parsed_elements:
+                break
+            empty_response = True
         except Exception as exc:  # noqa: BLE001 - next guess
             last_exc = exc
+            rejected_records = rejected_records or bool(_planner_diagnostics.get('timetable', {}).get('skipped'))
             continue
 
-    if raw_elements is None:
-        if last_exc is not None:
+    if not parsed_elements:
+        if last_exc is not None and (rejected_records or not empty_response):
             raise last_exc  # every guess failed: let run() record it
         return {}
 
     by_date: dict[str, list[dict]] = {}
 
-    for raw, pe in parse_planner_records(raw_elements, 'timetable'):
+    for raw, pe in parsed_elements:
+        raw = planner_details.public_payload(raw)
         posted_date = pe.period.date_time_from.date()
 
         course_names = ", ".join(str(c.name) for c in pe.courses) or None
@@ -544,6 +687,7 @@ def build_future_tasks(session: Smartschool, pending: list[dict]) -> tuple[list[
                     "due_date_source": source,
                 }
                 todo_record = {
+                    "source_id": 'future:' + str(t.assignment_id) if str(t.assignment_id or '') not in ('', '0') else None,
                     "course": course.course_title,
                     "type": t.type,
                     "description": t.description,
@@ -737,13 +881,14 @@ def fetch_lvs_note_detail(session, item_id: str) -> dict:
             'attachments': [{'name': attachment.file_name} for attachment in detail.attachments]}
 
 
+@serial_sync
 def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
     _fetch_errors.clear()
     _planner_diagnostics.clear()
     creds = credential_store.smartschool_credentials(ROOT / "credentials.yml")
-    session = Smartschool(creds)
+    session = TimeoutSmartschool(creds)
     other_info = creds.other_info or {}
     gemini_api_key = str(other_info.get("gemini_api_key") or '').strip() or None
     global _regex_active
@@ -797,11 +942,30 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     today = date.today()
     start_date = today - timedelta(days=days_back)
     cutoff = today + timedelta(days=days_ahead)
+    try:
+        previous = json.loads(OUTPUT_FILE.read_text(encoding='utf-8'))
+        if user_id is None or not isinstance(previous, dict) or previous.get('main_url') != main_url or previous.get('user_id') != user_id:
+            previous = {}
+    except (OSError, ValueError):
+        previous = {}
 
     pending: list[dict] = []
 
     print(f"Fetching lessons from {days_back} day(s) ago to {days_ahead} day(s) ahead...")
     lessons_by_day = build_lessons(session, days_back, days_ahead, pending, detail_fetcher)
+    failed_sources = set()
+    if 'planner' in _fetch_errors:
+        failed_sources.add('planner_api')
+    if _planner_diagnostics.get('legacy', {}).get('status') == 'failed':
+        failed_sources.add('legacy_agenda')
+    if failed_sources:
+        by_date = {day['date']: day['events'] for day in lessons_by_day}
+        for day in previous.get('days', []):
+            if start_date.isoformat() <= day['date'] <= cutoff.isoformat():
+                restored = [event for event in day['events'] if event.get('source') in failed_sources]
+                if restored:
+                    by_date.setdefault(day['date'], []).extend(restored)
+        lessons_by_day = [{'date': day, 'events': sorted(events, key=lambda event: event['start'])} for day, events in sorted(by_date.items())]
 
     print("Fetching upcoming tasks/tests...")
     try:
@@ -809,7 +973,9 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     except Exception as exc:  # noqa: BLE001 - optional
         print(f"  (could not fetch the separate future-tasks list: {exc})", file=sys.stderr)
         print("  Continuing without it - lesson-level to-dos below still work.", file=sys.stderr)
-        future_tasks, todos = [], []
+        _fetch_errors['future_tasks'] = exc
+        future_tasks = previous.get('future_tasks', [])
+        todos = [task for task in previous.get('todos', []) if task.get('source') == 'future_tasks']
 
     if detail_fetcher.ok_count or detail_fetcher.fail_count:
         print(f"  (assignment detail fetch: {detail_fetcher.ok_count} ok, {detail_fetcher.fail_count} failed, route: {detail_fetcher.template or 'none found'})")
@@ -825,13 +991,13 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         for ev in day["events"]:
             if ev["info"]:
                 for a in ev["info"]["assignments"]:
-                    a["id"] = stable_task_id(ev["course"], a["type"] or "", a["description"] or "", a["due_date"])
+                    a['body'] = a.get('body') or a.get('info') or ''
                     todos.append(
                         {
                             "course": ev["course"],
                             "type": a["type"],
                             "description": a["description"],
-                            "body": a.get("body", ""),
+                            "body": a.get("body") or a.get("info") or '',
                             "attachments": a.get("attachments", []),
                             "weblinks": a.get("weblinks", []),
                             "warning": a["warning"],
@@ -844,15 +1010,11 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
                             "moment_id": ev.get("moment_id"),
                             "element_source": ev.get("source"),
                             "element_type": ev.get("element_type"),
-                            "id": a["id"],
+                            "id": a.get("id"),
                         }
                     )
 
-    for t in todos:
-        if not t.get("id"):
-            t["id"] = stable_task_id(t["course"], t.get("type") or "", t["description"] or "", t["due_date"])
-
-    todos.sort(key=lambda t: t["due_date"])
+    todos = assign_task_ids(todos, lessons_by_day, previous, [main_url, user_id if user_id is not None else creds.username])
 
     print("Fetching full timetable (all classes, even without to-dos)...")
     try:
@@ -861,23 +1023,24 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         _planner_diagnostics.setdefault('timetable', {}).update(status='failed', error=type(exc).__name__)
         print(f"  (could not fetch the full timetable: {type(exc).__name__})", file=sys.stderr)
         _fetch_errors["timetable"] = exc
-        all_classes_by_date = {}
+        all_classes_by_date = {day['date']: day['events'] for day in previous.get('all_classes', [])
+                               if start_date.isoformat() <= day['date'] <= cutoff.isoformat()}
     all_classes = [
         {"date": d, "events": sorted(events, key=lambda e: e["start"])}
         for d, events in sorted(all_classes_by_date.items())
     ]
     skipped = sum(status.get('skipped', 0) for status in _planner_diagnostics.values())
-    if not lessons_by_day or not all_classes or skipped:
+    if not lessons_by_day or not all_classes or skipped or failed_sources or 'timetable' in _fetch_errors or 'future_tasks' in _fetch_errors:
         warnings.insert(0, {
             'source': 'planner', 'kind': 'planner_incomplete', 'title': 'Planner data may be incomplete',
             'message': f'Loaded {sum(len(day["events"]) for day in lessons_by_day)} schedule entries and '
                        f'{sum(len(day["events"]) for day in all_classes)} timetable entries. '
                        + (f'{skipped} records could not be read.' if skipped else 'Some planner sections returned no entries.'),
-            'hint': 'Check the same dates in Smartschool and try syncing again. If lessons are missing, share only the planner section of diagnostics in data/planner_data.json.',
+            'hint': 'Last saved entries are kept when a source fails. Retry syncing, or use Settings > Copy sync diagnostics for support.',
             'fix': False,
         })
 
-    if "planner" in _fetch_errors and "timetable" in _fetch_errors and not lessons_by_day:
+    if "planner" in _fetch_errors and "timetable" in _fetch_errors and not lessons_by_day and not previous and not skipped:
         # Nothing core could be loaded. Don't pretend the sync worked and don't overwrite older data with empties.
         cause = _fetch_errors["planner"]
         info = app_errors.address_problem(main_url)
@@ -935,7 +1098,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         },
     }
 
-    OUTPUT_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_snapshot(OUTPUT_FILE, output)
     print(f"Done. Wrote {OUTPUT_FILE}")
     return output
 

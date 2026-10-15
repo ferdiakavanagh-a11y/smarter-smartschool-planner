@@ -380,6 +380,8 @@ def extract_due_dates_batch(
 ) -> tuple[list[date | None], str]:
     """items: [(task_text, posted_date), ...]. Returns (results, note): detected date or None per item,
     plus a short summary ("" if none)."""
+    global last_problem
+    last_problem = None
     results: list[date | None] = [None] * len(items)
     if not items or not api_key:
         return results, ""
@@ -411,8 +413,6 @@ def extract_due_dates_batch(
     except Exception as exc:  # noqa: BLE001
         return results, f"AI deadline detection couldn't start: {exc}"
 
-    global last_problem
-    last_problem = None
     limiter = UsageLimiter(usage_file)
     keys = list(pending)
     requests_made = 0

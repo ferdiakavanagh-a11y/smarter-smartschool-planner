@@ -38,6 +38,7 @@ MIN_WIDTH, MIN_HEIGHT = 760, 560
 DATA_FILE = ROOT / "data" / "planner_data.json"
 CREDS_FILE = ROOT / "credentials.yml"
 LOG_FILE = ROOT / "error.log"
+_sync_lock = threading.Lock()
 
 
 def log_error(info: dict) -> None:
@@ -262,7 +263,7 @@ class Api:
             log_error({"kind": "config", "title": "Could not open login window", "message": str(exc), "details": traceback.format_exc()})
         after = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
         if after != before:
-            do_sync_and_render(self._window)  # new details saved: try again straight away
+            do_sync_and_render(self._window, wait=True)  # finish the current sync before using new details
         else:
             try:
                 self._window.evaluate_js("hideState()")
@@ -383,7 +384,7 @@ class Api:
                 return {'error': 'This note is not available. Sync LVS and try again.'}
             import sync
             import credential_store
-            session = sync.Smartschool(credential_store.smartschool_credentials(CREDS_FILE))
+            session = sync.TimeoutSmartschool(credential_store.smartschool_credentials(CREDS_FILE))
             return sync.fetch_lvs_note_detail(session, note_id)
         except Exception:
             return {'error': 'Could not load this note. Check your connection and LVS access, then try again.'}
@@ -425,7 +426,16 @@ class Api:
 api = Api()
 
 
-def do_sync_and_render(window):
+def do_sync_and_render(window, wait=False):
+    if not _sync_lock.acquire(blocking=wait):
+        return
+    try:
+        _do_sync_and_render(window)
+    finally:
+        _sync_lock.release()
+
+
+def _do_sync_and_render(window):
     import app_errors
     try:
         # spinner overlay, no reload flash

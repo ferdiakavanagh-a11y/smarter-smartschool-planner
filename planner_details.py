@@ -105,8 +105,19 @@ def _last_key(path: str) -> str:
 _PRIMARY_KEYS = ("publicInfo", "info")
 
 
+def public_payload(payload):
+    """Remove private and linked-record branches before text, links or raw fields are used."""
+    if isinstance(payload, dict):
+        return {k: public_payload(v) for k, v in payload.items()
+                if str(k).replace('_', '').lower() not in ('privateinfo', 'linkedplannedelement')}
+    if isinstance(payload, list):
+        return [public_payload(v) for v in payload]
+    return payload
+
+
 def extract_body(payload, title: str) -> str:
     """Task text ("Info voor de leerling") from a detail payload."""
+    payload = public_payload(payload)
     if isinstance(payload, dict) and any(k in payload for k in _PRIMARY_KEYS):
         for key in _PRIMARY_KEYS:
             value = payload.get(key)

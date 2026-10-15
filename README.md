@@ -149,6 +149,7 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `data/completed_tasks.json` | Your checked-off tasks |
 | `data/pinned_tasks.json` | Your pinned tasks |
 | `data/task_notes.json` | Your private notes |
+| `data/task_identities.json` | Persistent task IDs; preserves completion state, pins and notes across deadline changes |
 | `data/ui_settings.json` | Your display settings |
 | `data/gemini_cache.json` | Cached AI answers (skips re-asking about unchanged tasks) |
 | `data/gemini_usage.json` | Rate-limit bookkeeping, so limits hold across restarts |
