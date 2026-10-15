@@ -130,7 +130,7 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | File | Purpose |
 |---|---|
 | `desktop_app.py` | **The real app** - run this (or build the exe from it) |
-| `setup_ui.py` | First-run / "change login details" window; writes `credentials.yml` |
+| `setup_ui.py` | First-run / "change login details" window; saves secrets in the Windows vault |
 | `sync.py` | Fetches planner data and grades, orchestrates due-date resolution |
 | `planner_details.py` | Fetches each task's real body text (title-only otherwise) |
 | `dutch_dates.py` | The free keyword deadline parser (off by default) |
@@ -143,7 +143,8 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `setup_and_build.bat` | One click: install dependencies, build the exe, then the installer |
 | `SmartschoolPlanner.iss` | Inno Setup script for the installer |
 | `.github/workflows/release.yml` | Builds the installer on GitHub and attaches it to a release |
-| `credentials.yml.example` | Template - copy to `credentials.yml` and fill in (not needed with the installer) |
+| `credential_store.py` | Windows Credential Manager storage and verified plaintext migration |
+| `credentials.yml.example` | Legacy import format; prefer the app's login editor |
 | `data/planner_data.json` | Raw structured output (created after first sync) |
 | `data/completed_tasks.json` | Your checked-off tasks |
 | `data/pinned_tasks.json` | Your pinned tasks |
@@ -154,6 +155,16 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `data/planner_detail_route.json` | Which detail-endpoint guess worked, once found |
 
 ## Privacy
+Your username, password, MFA secret and Gemini key are stored in Windows
+Credential Manager, under your Windows account. `credentials.yml` contains only
+nonsecret configuration and a vault reference. Existing plaintext credentials
+are migrated automatically after verifying the new vault entry. Fresh installs
+collect credentials in the app, so the installer never writes plaintext secrets.
+There is no plaintext fallback if the vault is unavailable. Uninstall removes
+this installation's vault entries. Changing computers, Windows accounts or app
+folders requires entering your details again. Malware running as your Windows
+user may still retrieve secrets. Old backups and cloud file history are not erased.
+
 `credentials.yml` and everything in `data/` stay on your computer. They are
 never uploaded anywhere, and the installer never contains anyone's login. Your
 details are only sent where the app needs them: your username and password go

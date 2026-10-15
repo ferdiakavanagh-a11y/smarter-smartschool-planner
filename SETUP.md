@@ -2,8 +2,8 @@
 
 ## Easiest: the installer
 Download `SmartschoolPlanner-Setup.exe` from the **Releases** page of the
-repo, open it, enter your Smartschool login on the wizard page, and wait for
-it to finish. Then open **Smartschool Planner** from the Start Menu. No Python
+repo, open it and wait for installation to finish. Enter your Smartschool
+login in the app on its first launch. Then open **Smartschool Planner** from the Start Menu. No Python
 and no files to edit - the rest of this page is only for running from source.
 
 To change your login details later, use **Smartschool Planner - Change login
@@ -40,20 +40,17 @@ file for you. You can reopen it any time with:
 python desktop_app.py --setup
 ```
 
-The manual way: copy `credentials.yml.example` to `credentials.yml` in the
-same folder, and fill in:
-- `username` / `password` - your normal Smartschool login
-- `main_url` - your school's Smartschool address, WITHOUT `https://`
-  (e.g. `yourschool.smartschool.be`)
-- `mfa` - only relevant if login asks a security question or you have real
-  2FA. If it asks for your birthdate, write it as `YYYY-MM-DD` (e.g.
-  `2008-05-14`). For an authenticator app, put the TOTP secret here. If your
-  account doesn't ask for either, leave it as `REPLACE_ME`.
-- `gemini_api_key` - optional. Leave blank to skip. If set, it's what finds
-  deadlines written in the assignment text, which is what makes the real due
-  dates show up - get a free key at https://aistudio.google.com/apikey.
+Secrets (username, password, security answer and optional Gemini key) are saved
+in Windows Credential Manager, under your Windows account. `credentials.yml`
+contains only the school address, advanced configuration and a vault reference.
+Existing plaintext files are migrated automatically at startup or sync, after
+verifying the vault entry. There is no plaintext storage fallback.
 
-`credentials.yml` stays local on your machine only - never share it or upload it anywhere.
+Use Settings > Change login info to edit secrets. A Gemini key is optional;
+without one, date checking uses Local. Moving the app folder, changing Windows
+accounts or moving to a new computer requires entering your login again.
+Task Scheduler must run under the Windows account that saved the credentials.
+Windows Home is supported; other operating systems cannot save credentials.
 
 ### 5. Run the app
 ```
@@ -70,7 +67,7 @@ window). A sync takes a few seconds.
 
 If login fails, the usual causes are a wrong username or password, `main_url`
 being wrong (it must not start with `https://`), or the security answer
-(a birthdate must be written as `YYYY-MM-DD`). Fix it in `credentials.yml`
+(a birthdate must be written as `YYYY-MM-DD`). Use Settings > Change login info
 (or run `python desktop_app.py --setup`) and sync again. Don't retry many
 times with a wrong password, as Smartschool can lock the account for a while.
 

@@ -62,14 +62,9 @@ def date_checker_mode(root: Path, gemini_key) -> str:
 
 
 def date_checker_state(root: Path) -> dict:
-    import yaml
-    try:
-        credentials = yaml.safe_load((root / 'credentials.yml').read_text(encoding='utf-8')) or {}
-    except FileNotFoundError:
-        credentials = {}
-    except yaml.YAMLError as exc:
-        raise ValueError('Could not read login settings') from exc
-    key = credentials.get('gemini_api_key') if isinstance(credentials, dict) else None
+    import credential_store
+    credentials = credential_store.load_credentials(root / 'credentials.yml')
+    key = credentials.get('gemini_api_key')
     return {'mode': date_checker_mode(root, key), 'geminiAvailable': bool(str(key or '').strip())}
 
 

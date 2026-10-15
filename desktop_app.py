@@ -382,7 +382,8 @@ class Api:
             if not any(str(note.get('id')) == note_id for note in data.get('lvs', {}).get('notes', [])):
                 return {'error': 'This note is not available. Sync LVS and try again.'}
             import sync
-            session = sync.Smartschool(sync.PathCredentials(str(CREDS_FILE)))
+            import credential_store
+            session = sync.Smartschool(credential_store.smartschool_credentials(CREDS_FILE))
             return sync.fetch_lvs_note_detail(session, note_id)
         except Exception:
             return {'error': 'Could not load this note. Check your connection and LVS access, then try again.'}
@@ -487,6 +488,13 @@ def load_cached_html() -> str:
 
 
 def main():
+    if "--clear-credentials" in sys.argv:
+        import credential_store
+        try:
+            credential_store.clear_credentials(CREDS_FILE)
+        except (OSError, credential_store.CredentialError):
+            sys.exit(1)
+        return
     if "--setup-only" in sys.argv:  # helper mode: just the login-details window, then exit
         import setup_ui  # noqa: PLC0415
 
@@ -496,7 +504,14 @@ def main():
     just_set_up = False
     if "--updated" in sys.argv:
         (ROOT / "data" / "rendering_choice_pending").unlink(missing_ok=True)
-    if "--setup" in sys.argv or not CREDS_FILE.exists():
+    import credential_store
+    credentials_unavailable = False
+    if CREDS_FILE.exists():
+        try:
+            credential_store.load_credentials(CREDS_FILE)
+        except (OSError, credential_store.CredentialError):
+            credentials_unavailable = True
+    if "--setup" in sys.argv or not CREDS_FILE.exists() or credentials_unavailable:
         import setup_ui  # noqa: PLC0415
 
         had_file = CREDS_FILE.exists()

@@ -40,9 +40,9 @@ browser chrome) showing:
 If something goes wrong (bad credentials, no internet), the window shows the
 error directly with a **Retry** button - no console output to dig through.
 
-`credentials.yml` still needs to sit next to the exe, same as before - it's
-not baked into the exe (on purpose, so you never need to rebuild it just
-because you changed a password).
+`credentials.yml` beside the exe stores nonsecret configuration and a vault
+reference. Passwords and API keys live in Windows Credential Manager. Use the
+app's login editor to change them; no rebuild is needed.
 
 ## One dependency to be aware of
 

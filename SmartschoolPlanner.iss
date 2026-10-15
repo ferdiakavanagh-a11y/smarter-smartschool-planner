@@ -42,7 +42,6 @@ Filename: "{app}\{#AppExe}"; Parameters: "{code:LaunchParameters}"; Description:
 
 [Code]
 var
-  CredPage: TInputQueryWizardPage;
   WasUpgrade: Boolean;
 
 function LaunchParameters(Param: String): String;
@@ -59,126 +58,7 @@ begin
   Result := True;
 end;
 
-procedure InitializeWizard;
-begin
-  CredPage := CreateInputQueryPage(wpSelectDir, 'Smartschool login',
-    'Enter your Smartschool details', 'They are saved only on this computer.');
-  CredPage.Add('Username:', False);
-  CredPage.Add('Password:', True);
-  CredPage.Add('School address (e.g. yourschool.smartschool.be):', False);
-  CredPage.Add('Security answer: birthdate as YYYY-MM-DD, or 2FA secret (optional):', False);
-  CredPage.Add('Gemini API key (optional, enables deadline detection):', False);
-end;
-
-function CredFile: String;
-begin
-  Result := WizardDirValue + '\credentials.yml';
-end;
-
-function ShouldSkipPage(PageID: Integer): Boolean;
-begin
-  { keep existing login details when reinstalling/updating }
-  Result := (PageID = CredPage.ID) and FileExists(CredFile);
-end;
-
-function CleanUrl(S: String): String;
-var P: Integer;
-begin
-  S := Trim(S);
-  StringChangeEx(S, 'https://', '', True);
-  StringChangeEx(S, 'http://', '', True);
-  P := Pos('/', S);
-  if P > 0 then S := Copy(S, 1, P - 1);
-  Result := Trim(S);
-end;
-
-function Q(S: String): String;
-begin
-  StringChangeEx(S, '\', '\\', True);
-  StringChangeEx(S, '"', '\"', True);
-  Result := '"' + S + '"';
-end;
-
-function NormalizeSecurity(S: String; var Bad: Boolean): String;
-var
-  I, P: Integer;
-  A, B, C, Rest, Y, M, D: String;
-  DateLike: Boolean;
-begin
-  Bad := False;
-  S := Trim(S);
-  Result := S;
-  if S = '' then Exit;
-  DateLike := True;
-  for I := 1 to Length(S) do
-    if Pos(S[I], '0123456789-./') = 0 then DateLike := False;
-  if not DateLike then Exit;  { e.g. a 2FA secret: keep as is }
-
-  if (Length(S) = 8) and (Pos('-', S) = 0) and (Pos('.', S) = 0) and (Pos('/', S) = 0) then
-  begin
-    Y := Copy(S, 1, 4); M := Copy(S, 5, 2); D := Copy(S, 7, 2);
-  end else
-  begin
-    StringChangeEx(S, '.', '-', True);
-    StringChangeEx(S, '/', '-', True);
-    P := Pos('-', S);
-    if P = 0 then begin Bad := True; Exit; end;
-    A := Copy(S, 1, P - 1);
-    Rest := Copy(S, P + 1, Length(S));
-    P := Pos('-', Rest);
-    if P = 0 then begin Bad := True; Exit; end;
-    B := Copy(Rest, 1, P - 1);
-    C := Copy(Rest, P + 1, Length(Rest));
-    if (Pos('-', C) > 0) or (A = '') or (B = '') or (C = '') then begin Bad := True; Exit; end;
-    if (Length(A) = 4) and (Length(C) <= 2) then
-    begin
-      Y := A; M := B; D := C;
-    end else if (Length(C) = 4) and (Length(A) <= 2) then
-    begin
-      Y := C; M := B; D := A;
-    end else
-    begin
-      Bad := True; Exit;
-    end;
-  end;
-  if Length(M) = 1 then M := '0' + M;
-  if Length(D) = 1 then D := '0' + D;
-  if (StrToIntDef(M, 0) < 1) or (StrToIntDef(M, 0) > 12) or
-     (StrToIntDef(D, 0) < 1) or (StrToIntDef(D, 0) > 31) then
-  begin
-    Bad := True; Exit;
-  end;
-  Result := Y + '-' + M + '-' + D;
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  Bad: Boolean;
-begin
-  Result := True;
-  if CurPageID = CredPage.ID then
-  begin
-    NormalizeSecurity(CredPage.Values[3], Bad);
-    if Bad then
-    begin
-      MsgBox('Birthdate must be in YYYY-MM-DD format, e.g. 2008-05-14.', mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    if (Trim(CredPage.Values[0]) = '') or (CredPage.Values[1] = '') or (CleanUrl(CredPage.Values[2]) = '') then
-    begin
-      MsgBox('Username, password and school address are required.', mbError, MB_OK);
-      Result := False;
-    end;
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  L: TArrayOfString;
-  Mfa: String;
-  RC: Integer;
-  Bad: Boolean;
 begin
   if CurStep = ssInstall then
     WasUpgrade := FileExists(ExpandConstant('{app}\{#AppExe}'));
@@ -197,26 +77,25 @@ begin
         RaiseException('Could not save the first-start rendering choice.');
     end;
   end;
-  if (CurStep = ssPostInstall) and (not FileExists(CredFile)) then
+
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var RC: Integer;
+begin
+  if CurUninstallStep = usUninstall then
   begin
-    Mfa := NormalizeSecurity(CredPage.Values[3], Bad);
-    if Mfa = '' then Mfa := 'REPLACE_ME';
-    SetArrayLength(L, 6);
-    L[0] := 'username: ' + Q(Trim(CredPage.Values[0]));
-    L[1] := 'password: ' + Q(CredPage.Values[1]);
-    L[2] := 'main_url: ' + Q(CleanUrl(CredPage.Values[2]));
-    L[3] := 'mfa: ' + Q(Mfa);
-    L[4] := 'gemini_api_key: ' + Q(Trim(CredPage.Values[4]));
-    L[5] := 'planner_detail_url: ""';
-    SaveStringsToUTF8File(CredFile, L, False);
-    { owner-only access }
-    Exec('icacls', '"' + CredFile + '" /inheritance:r /grant:r "' + GetUserNameString + ':F"',
-      '', SW_HIDE, ewWaitUntilTerminated, RC);
+    if FileExists(ExpandConstant('{app}\{#AppExe}')) then
+      if not Exec(ExpandConstant('{app}\{#AppExe}'), '--clear-credentials', '',
+        SW_HIDE, ewWaitUntilTerminated, RC) then
+        RaiseException('Could not remove saved login details. Close the app and retry uninstalling.')
+      else if RC <> 0 then
+        RaiseException('Windows could not remove saved login details. Retry uninstalling under the account that installed the app.');
   end;
 end;
 
 [UninstallDelete]
-; credentials contain a password: remove them with the app
+; remove the nonsecret vault reference and local planner data
 Type: files; Name: "{app}\credentials.yml"
 Type: filesandordirs; Name: "{app}\data"
 Type: files; Name: "{app}\dashboard.html"

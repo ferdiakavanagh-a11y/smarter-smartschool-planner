@@ -13,7 +13,6 @@ from pathlib import Path
 
 from smartschool import (
     FutureTasks,
-    PathCredentials,
     PlannedElement,
     Smartschool,
     SmartschoolHours,
@@ -36,6 +35,7 @@ import gemini_dates
 import planner_details
 import app_errors
 import task_state
+import credential_store
 
 _regex_active = False  # resolved from the saved choice and key at the start of each sync
 
@@ -716,7 +716,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
     _fetch_errors.clear()
-    creds = PathCredentials(str(ROOT / "credentials.yml"))
+    creds = credential_store.smartschool_credentials(ROOT / "credentials.yml")
     session = Smartschool(creds)
     other_info = creds.other_info or {}
     gemini_api_key = str(other_info.get("gemini_api_key") or '').strip() or None

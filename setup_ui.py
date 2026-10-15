@@ -1,6 +1,5 @@
 """
-First-run setup window: asks for the Smartschool login details and writes
-credentials.yml, so nobody has to edit the file by hand.
+First-run setup window: saves secrets in Windows Credential Manager.
 
 Used by desktop_app.py when credentials.yml is missing, or when the app is
 started with --setup (the "Change credentials" shortcut does this).
@@ -13,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import yaml
+import credential_store
 
 PLACEHOLDER_MFA = "REPLACE_ME"  # what credentials.yml.example ships with
 
@@ -53,11 +52,7 @@ def normalize_security(value: str):
 
 
 def load_existing(path: Path) -> dict:
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        return data if isinstance(data, dict) else {}
-    except Exception:  # noqa: BLE001 - missing/corrupt: start blank
-        return {}
+    return credential_store.load_credentials(path)
 
 
 def restrict_permissions(path: Path) -> None:
@@ -79,7 +74,7 @@ def restrict_permissions(path: Path) -> None:
 
 
 def write_credentials(path: Path, username, password, main_url, mfa="", gemini_key="") -> None:
-    data = load_existing(path)  # keep advanced keys like planner_detail_url
+    data = credential_store.read_config(path)  # keep advanced keys even when a vault entry is missing
     data.update(
         {
             "username": username.strip(),
@@ -90,8 +85,7 @@ def write_credentials(path: Path, username, password, main_url, mfa="", gemini_k
         }
     )
     data.setdefault("planner_detail_url", "")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    credential_store.save_credentials(path, data)
     restrict_permissions(path)
 
 
@@ -100,12 +94,19 @@ def run_setup(path: Path) -> bool:
     import tkinter as tk
     from tkinter import messagebox, ttk
 
-    existing = load_existing(path)
+    load_error = False
+    try:
+        existing = load_existing(path)
+    except (OSError, credential_store.CredentialError):
+        existing = {}
+        load_error = True
     saved = {"ok": False}
 
     root = tk.Tk()
     root.title("Smartschool Planner - Setup")
     root.resizable(False, False)
+    if load_error:
+        messagebox.showwarning('Login details unavailable', 'Saved login details could not be opened. Enter them again to replace them.', parent=root)
     try:
         icon = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "assets" / "icon.ico"
         if icon.exists():
@@ -121,7 +122,7 @@ def run_setup(path: Path) -> bool:
     )
     ttk.Label(
         frm,
-        text="Your details are saved only on this computer.",
+        text="Your details are protected by Windows Credential Manager.",
         foreground="#555",
     ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 12))
 
@@ -143,12 +144,14 @@ def run_setup(path: Path) -> bool:
         "Security answer (optional)",
         "Birthdate as YYYY-MM-DD (if login asks), or your 2FA secret",
         "" if mfa_old == PLACEHOLDER_MFA else mfa_old,
+        show="*",
     )
     v_key = field(
         4,
         "Gemini API key (optional)",
         "Enables deadline detection - free at aistudio.google.com/apikey",
         str(existing.get("gemini_api_key", "") or ""),
+        show="*",
     )
 
     def on_save():
@@ -161,8 +164,8 @@ def run_setup(path: Path) -> bool:
             return
         try:
             write_credentials(path, v_user.get(), v_pass.get(), v_url.get(), mfa_value, v_key.get())
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Could not save", str(exc))
+        except Exception:  # Never include secret-bearing exception payloads in UI or logs.
+            messagebox.showerror("Could not save", "Windows could not securely save your details. Existing details were kept. Check Credential Manager and try again.")
             return
         saved["ok"] = True
         root.destroy()
