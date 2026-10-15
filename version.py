@@ -1,6 +1,6 @@
 """keeps track of current version, bump when pushing a new release"""
 
-__version__ = "2.1.1"
+__version__ = "2.1.2"
 
 # Update these notes alongside the version for each release (offline installer fallback).
 RELEASE_NOTES = """## Task Focus
