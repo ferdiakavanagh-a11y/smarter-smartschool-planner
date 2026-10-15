@@ -18,9 +18,9 @@ Builds always regenerate the spec from the current command; old single-file
 specs are not reused. You can delete `build`, `dist`, and the generated `.spec`
 after compiling the installer, but keep the root `_internal` to run the local EXE.
 
-The release workflow checks dependency compatibility and runs `release_tests/` before building.
-Run the same checks locally with `python -m unittest discover -s release_tests -v`
-(Node.js must be installed for the UI checks). Update the lock deliberately when changing dependencies.
+The release workflow checks dependency compatibility before building.
+Tests are kept locally and excluded from Git. Update the dependency lock deliberately
+when changing dependencies.
 
 ## Installer and updates
 
@@ -94,5 +94,5 @@ missed - `pywebview`'s Windows backend in particular relies on `pythonnet`,
 which PyInstaller can be picky about). If the resulting .exe crashes right
 away with an import error, paste me the error - it's almost always fixed by
 adding one more `--hidden-import=...` or `--collect-all ...` flag to
-`build_exe.bat`. Release regression checks run before packaging; test the built
+`build_exe.bat`. Run your local checks and test the built
 installer on a separate Windows account before publishing it.

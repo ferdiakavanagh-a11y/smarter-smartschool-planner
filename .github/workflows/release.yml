@@ -27,8 +27,6 @@ jobs:
         run: python -m pip install --no-deps -r requirements-release.txt
       - name: Validate release dependencies
         run: python -m pip check
-      - name: Run release regression checks
-        run: python -m unittest discover -s release_tests -p "test_*.py" -v
       - name: Build exe
         shell: cmd
         run: build_exe.bat < nul
