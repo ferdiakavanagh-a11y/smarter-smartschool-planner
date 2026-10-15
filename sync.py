@@ -36,6 +36,7 @@ import planner_details
 import app_errors
 import task_state
 import credential_store
+from version import __version__
 
 _regex_active = False  # resolved from the saved choice and key at the start of each sync
 
@@ -161,6 +162,32 @@ def _is_technical_field(path: str) -> bool:
 
 # Core fetches that failed during this sync (they are best-effort, but if ALL fail the sync must not look successful)
 _fetch_errors: dict[str, Exception] = {}
+_planner_diagnostics: dict[str, dict] = {}
+
+
+def parse_planner_records(raw_elements, source: str):
+    """Keep valid records and record schema failures without storing student content."""
+    if not isinstance(raw_elements, list):
+        _planner_diagnostics[source] = {'status': 'invalid_response', 'error': 'ExpectedList'}
+        raise ValueError('Planner returned an unexpected response format')
+    status = {'status': 'ok', 'received': len(raw_elements), 'parsed': 0, 'skipped': 0, 'schema_errors': []}
+    _planner_diagnostics[source] = status
+    for raw in raw_elements:
+        try:
+            element = PlannedElement(**raw)
+        except (ValueError, TypeError) as exc:
+            status['skipped'] += 1
+            status['status'] = 'partial'
+            # Pydantic exception strings include input values; store field names and error codes only.
+            from pydantic import ValidationError
+            if isinstance(exc, ValidationError):
+                for error in exc.errors(include_input=False, include_context=False, include_url=False):
+                    item = {'field': '.'.join(str(part) for part in error['loc']), 'type': error['type']}
+                    if item not in status['schema_errors'] and len(status['schema_errors']) < 12:
+                        status['schema_errors'].append(item)
+            continue
+        status['parsed'] += 1
+        yield raw, element
 
 
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([.,]\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
@@ -313,8 +340,7 @@ def build_lessons_planner_api(
 
     by_date: dict[str, list[dict]] = {}
 
-    for raw in raw_elements:
-        pe = PlannedElement(**raw)
+    for raw, pe in parse_planner_records(raw_elements, 'planner'):
         posted_date = pe.period.date_time_from.date()
 
         course_names = ", ".join(str(c.name) for c in pe.courses) or None
@@ -401,7 +427,7 @@ def build_lessons_planner_api(
 
 
 def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff: date) -> dict[str, list[dict]]:
-    """Best-effort fetch of every class period (for "All Classes"). Unverified on a live account; fails quietly."""
+    """Best-effort fetch of every class period; unsupported records are reported."""
     user_id = session.authenticated_user["id"]
     url = f"/planner/api/v1/planned-elements/user/{user_id}"
     base_data = {"from": start_date.isoformat(), "to": cutoff.isoformat()}
@@ -427,11 +453,7 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
 
     by_date: dict[str, list[dict]] = {}
 
-    for raw in raw_elements:
-        try:
-            pe = PlannedElement(**raw)
-        except Exception:  # noqa: BLE001 - skip odd shapes
-            continue
+    for raw, pe in parse_planner_records(raw_elements, 'timetable'):
         posted_date = pe.period.date_time_from.date()
 
         course_names = ", ".join(str(c.name) for c in pe.courses) or None
@@ -474,19 +496,22 @@ def build_lessons(
 
     try:
         legacy = build_lessons_legacy(session, start_date, cutoff, pending)
+        _planner_diagnostics['legacy'] = {'status': 'ok', 'parsed': sum(len(events) for events in legacy.values())}
         for d, events in legacy.items():
             by_date.setdefault(d, []).extend(events)
         if not legacy:
             print("  (legacy agenda endpoint returned nothing - your school is likely on the newer planner)")
     except Exception as exc:  # noqa: BLE001 - best effort
-        print(f"  (legacy agenda fetch failed, continuing with the newer planner API: {exc})", file=sys.stderr)
+        _planner_diagnostics['legacy'] = {'status': 'failed', 'error': type(exc).__name__}
+        print(f"  (legacy agenda fetch failed: {type(exc).__name__}; continuing with the newer planner API)", file=sys.stderr)
 
     try:
         planner = build_lessons_planner_api(session, start_date, cutoff, pending, detail_fetcher)
         for d, events in planner.items():
             by_date.setdefault(d, []).extend(events)
     except Exception as exc:  # noqa: BLE001 - best effort
-        print(f"  (newer planner API fetch failed: {exc})", file=sys.stderr)
+        _planner_diagnostics.setdefault('planner', {}).update(status='failed', error=type(exc).__name__)
+        print(f"  (newer planner API fetch failed: {type(exc).__name__})", file=sys.stderr)
         _fetch_errors["planner"] = exc
 
     days = []
@@ -716,6 +741,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
     _fetch_errors.clear()
+    _planner_diagnostics.clear()
     creds = credential_store.smartschool_credentials(ROOT / "credentials.yml")
     session = Smartschool(creds)
     other_info = creds.other_info or {}
@@ -832,13 +858,24 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     try:
         all_classes_by_date = build_all_classes_planner_api(session, start_date, cutoff)
     except Exception as exc:  # noqa: BLE001 - optional tab
-        print(f"  (could not fetch the full timetable: {exc})", file=sys.stderr)
+        _planner_diagnostics.setdefault('timetable', {}).update(status='failed', error=type(exc).__name__)
+        print(f"  (could not fetch the full timetable: {type(exc).__name__})", file=sys.stderr)
         _fetch_errors["timetable"] = exc
         all_classes_by_date = {}
     all_classes = [
         {"date": d, "events": sorted(events, key=lambda e: e["start"])}
         for d, events in sorted(all_classes_by_date.items())
     ]
+    skipped = sum(status.get('skipped', 0) for status in _planner_diagnostics.values())
+    if not lessons_by_day or not all_classes or skipped:
+        warnings.insert(0, {
+            'source': 'planner', 'kind': 'planner_incomplete', 'title': 'Planner data may be incomplete',
+            'message': f'Loaded {sum(len(day["events"]) for day in lessons_by_day)} schedule entries and '
+                       f'{sum(len(day["events"]) for day in all_classes)} timetable entries. '
+                       + (f'{skipped} records could not be read.' if skipped else 'Some planner sections returned no entries.'),
+            'hint': 'Check the same dates in Smartschool and try syncing again. If lessons are missing, share only the planner section of diagnostics in data/planner_data.json.',
+            'fix': False,
+        })
 
     if "planner" in _fetch_errors and "timetable" in _fetch_errors and not lessons_by_day:
         # Nothing core could be loaded. Don't pretend the sync worked and don't overwrite older data with empties.
@@ -888,6 +925,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "assignment_types": assignment_types,
         "warnings": warnings,
         "diagnostics": {
+            "app_version": __version__,
+            "planner": {"from": start_date.isoformat(), "to": cutoff.isoformat(), "sources": _planner_diagnostics.copy()},
             "regex_parser_enabled": _regex_active,
             "gemini_configured": bool(gemini_api_key),
             "detail_fetch_status": detail_fetcher.status,

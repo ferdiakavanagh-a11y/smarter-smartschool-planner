@@ -1557,6 +1557,33 @@ async function setDateChecker(mode){
     if (status.isConnected) status.textContent = 'Could not save this choice. Please try again.';
   }
 }
+function syncDiagnosticsText(){
+  var diagnostics=DATA.diagnostics||{}, planner=diagnostics.planner||{}, sources={};
+  ['legacy','planner','timetable'].forEach(function(name){
+    var source=(planner.sources||{})[name];if(!source)return;
+    var clean={};
+    ['status','error'].forEach(function(key){if(typeof source[key]==='string')clean[key]=source[key].slice(0,80);});
+    ['received','parsed','skipped'].forEach(function(key){if(Number.isFinite(source[key]))clean[key]=source[key];});
+    clean.schema_errors=(source.schema_errors||[]).slice(0,12).map(function(item){return {field:String(item.field||'').slice(0,120),type:String(item.type||'').slice(0,80)};});
+    sources[name]=clean;
+  });
+  function events(days){return (days||[]).reduce(function(total,day){return total+(day.events||[]).length;},0);}
+  return JSON.stringify({report:'Smartschool Planner sync diagnostics',version:diagnostics.app_version||'Unknown (sync with updated app)',
+    counts:{schedule:events(DATA.days),timetable:events(DATA.all_classes),tasks:(DATA.todos||[]).length},
+    plannerDiagnosticsAvailable:!!diagnostics.planner,sources:sources},null,2);
+}
+async function copySyncDiagnostics(button){
+  button.disabled=true;
+  var report=document.getElementById('syncDiagnosticsReport'), status=document.getElementById('syncDiagnosticsStatus');
+  report.value=syncDiagnosticsText();report.hidden=false;
+  try {
+    if(navigator.clipboard && navigator.clipboard.writeText)await navigator.clipboard.writeText(report.value);
+    else {report.focus();report.select();if(!document.execCommand('copy'))throw new Error('copy');}
+    status.textContent='Copied. You can paste this report into a support message.';
+  } catch(e) {
+    if(report.isConnected){report.focus();report.select();status.textContent='Copy was unavailable. Select and copy the report below.';}
+  } finally {button.disabled=false;}
+}
 function openSettings(){
   var st = document.documentElement.getAttribute("data-style") || "vivid";
   var body =
@@ -1577,6 +1604,7 @@ function openSettings(){
     (DATA.main_url ? '<div class="setting-group"><h4>Account</h4><div class="detail-list">'+rows([["School",DATA.main_url]])+'</div></div>'+
     '<button class="btn-primary" data-external="1">'+ICON.ext+' Open in Smartschool</button>' : "");
   if (EMBEDDED) body += '<div class="setting-group"><button class="btn-secondary" data-change-login="1">Change login info</button></div>';
+  body += '<div class="setting-group"><h4>Sync support</h4><button class="btn-secondary" data-copy-sync-diagnostics>Copy sync diagnostics</button><p class="detail-desc" id="syncDiagnosticsStatus" role="status">Copies counts and technical error fields only. No login details, school address, lesson text or LVS content.</p><textarea id="syncDiagnosticsReport" class="note-area" aria-label="Sync diagnostics report" readonly hidden spellcheck="false"></textarea></div>';
   var rebuilt = showSheet("Settings", body, null, true);
   refreshDateChecker();
   if (!rebuilt) return;
@@ -1825,6 +1853,7 @@ document.getElementById("sheetBody").addEventListener("input", function(e){
   noteTimer = setTimeout(flushNote, 500);
 });
 document.getElementById("sheetBody").addEventListener("click", function(e){
+  var diagnostics=e.target.closest('[data-copy-sync-diagnostics]');if(diagnostics){copySyncDiagnostics(diagnostics);return;}
   var checker = e.target.closest('[data-date-checker]'); if (checker) {setDateChecker(checker.dataset.dateChecker); return;}
   if (e.target.closest('[data-change-login]')) {
     var api = bridge();
