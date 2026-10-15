@@ -28,6 +28,9 @@ def main():
         raise SystemExit(f"{DATA_FILE} not found - run sync.py first.")
 
     data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+    import credential_store
+    if data.get('account_key') != credential_store.account_key(credential_store.load_credentials(ROOT / 'credentials.yml')):
+        raise SystemExit('Saved data belongs to a different or unverified account. Sync this account first.')
     html = planner_html.render_html(data, completed_ids=[], embedded=False)
     OUTPUT_FILE.write_text(html, encoding="utf-8")
     print(f"Wrote {OUTPUT_FILE} - open it in your browser.")

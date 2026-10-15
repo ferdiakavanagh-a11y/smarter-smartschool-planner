@@ -263,6 +263,8 @@ class Api:
             log_error({"kind": "config", "title": "Could not open login window", "message": str(exc), "details": traceback.format_exc()})
         after = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
         if after != before:
+            self.focus_end()
+            self._window.load_html(load_cached_html())
             do_sync_and_render(self._window, wait=True)  # finish the current sync before using new details
         else:
             try:
@@ -299,6 +301,14 @@ class Api:
 
     def _check_for_update(self):
         import updater
+        while updater.pending_install_failure(ROOT) and not self._closed.is_set():
+            try:
+                if self._window.evaluate_js('showUpdateFailure()'):
+                    updater.acknowledge_install_failure(ROOT)
+                    break
+            except Exception:
+                pass
+            self._closed.wait(2)
         if "--updated" in sys.argv:
             try:
                 updater.prepare_installed_notice(ROOT, __version__, RELEASE_NOTES)
@@ -364,7 +374,7 @@ class Api:
             path = updater.download_and_verify(self._update, progress)
             updater.save_update_notice(ROOT, self._update)
             self._banner_status("Installing... the app will restart.")
-            updater.launch_installer(path)
+            updater.launch_installer(path, ROOT)
             time.sleep(1.5)
             self._window.destroy()  # the installer replaces the exe and starts the new version
         except Exception as exc:  # noqa: BLE001
@@ -380,11 +390,14 @@ class Api:
         note_id = str(note_id)
         try:
             data = json.loads(DATA_FILE.read_text(encoding='utf-8'))
+            import credential_store
+            creds = credential_store.smartschool_credentials(CREDS_FILE)
+            if data.get('account_key') != credential_store.account_key({'main_url': creds.main_url, 'username': creds.username}):
+                return {'error': 'Sync this account before opening LVS notes.'}
             if not any(str(note.get('id')) == note_id for note in data.get('lvs', {}).get('notes', [])):
                 return {'error': 'This note is not available. Sync LVS and try again.'}
             import sync
-            import credential_store
-            session = sync.TimeoutSmartschool(credential_store.smartschool_credentials(CREDS_FILE))
+            session = sync.TimeoutSmartschool(creds)
             return sync.fetch_lvs_note_detail(session, note_id)
         except Exception:
             return {'error': 'Could not load this note. Check your connection and LVS access, then try again.'}
@@ -459,6 +472,10 @@ def _do_sync_and_render(window):
 
         import sync
         data = sync.run(days_back=10, days_ahead=21)
+        import credential_store
+        if data.get('account_key') != credential_store.account_key(credential_store.load_credentials(CREDS_FILE)):
+            window.load_html(load_cached_html())
+            return
         completed = task_state.load_completed_ids(ROOT)
         html = planner_html.render_html(
             data, completed, embedded=True, settings=task_state.load_settings(ROOT),
@@ -478,6 +495,10 @@ def load_cached_html() -> str:
     if DATA_FILE.exists():
         try:
             data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            import credential_store
+            account = credential_store.account_key(credential_store.load_credentials(CREDS_FILE))
+            if data.get('account_key') != account:
+                raise ValueError('Saved planner belongs to a different or unverified account')
             completed = task_state.load_completed_ids(ROOT)
             print(f"Startup: showing saved data from {DATA_FILE} - not syncing.")
             return planner_html.render_html(

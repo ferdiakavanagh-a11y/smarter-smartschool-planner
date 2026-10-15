@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
@@ -174,11 +176,50 @@ def download_and_verify(info: dict, progress=None) -> Path:
     return path
 
 
-def launch_installer(path: Path) -> None:
+def launch_installer(path: Path, root: Path | None = None) -> None:
     """Start the installer with no window at all (it closes this app, replaces the files and relaunches it)."""
-    env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")  # so the relaunched exe starts fresh
+    root = root or Path(__file__).resolve().parent
+    def literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    result = root / 'data' / 'install_result.json'
+    result.parent.mkdir(exist_ok=True)
+    result.unlink(missing_ok=True)
+    # A separate PowerShell worker survives the installer's taskkill of the app EXE.
+    script = f"""
+$ErrorActionPreference = 'Stop'
+[System.IO.File]::WriteAllText({literal(result)}, '{{"status":"running"}}')
+$code = -1
+try {{
+  $process = Start-Process -FilePath {literal(path)} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS' -WindowStyle Hidden -PassThru -Wait
+  $code = $process.ExitCode
+}} catch {{ $code = -1 }}
+$result = @{{status = $(if ($code -eq 0) {{'ok'}} else {{'failed'}}); code = $code}} | ConvertTo-Json -Compress
+[System.IO.File]::WriteAllText({literal(result.with_suffix('.tmp'))}, $result)
+Move-Item -LiteralPath {literal(result.with_suffix('.tmp'))} -Destination {literal(result)} -Force
+if ($code -ne 0) {{ Start-Process -FilePath {literal(root / 'SmartschoolPlanner.exe')} -ArgumentList '--update-failed' -WindowStyle Normal }}
+"""
+    encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+    env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(  # noqa: S603
-        [str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+    worker = subprocess.Popen(  # noqa: S603
+        [str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'),
+         '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
         env=env, creationflags=flags, close_fds=True,
     )
+    deadline = time.monotonic() + 5
+    while not result.exists():
+        if worker.poll() is not None or time.monotonic() >= deadline:
+            raise UpdateError('The installer monitor could not start. Please try again.')
+        time.sleep(0.05)
+
+
+def pending_install_failure(root: Path) -> bool:
+    try:
+        result = json.loads((root / 'data' / 'install_result.json').read_text(encoding='utf-8-sig'))
+        return result.get('status') == 'failed'
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def acknowledge_install_failure(root: Path) -> None:
+    (root / 'data' / 'install_result.json').unlink(missing_ok=True)

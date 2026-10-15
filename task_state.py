@@ -50,9 +50,7 @@ def load_completed_ids(root: Path) -> set[str]:
 
 
 def save_completed_ids(root: Path, ids: set[str]) -> None:
-    path = _file_path(root)
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(sorted(ids)), encoding="utf-8")
+    _atomic_json(_file_path(root), sorted(ids))
 
 
 @state_write
@@ -148,8 +146,7 @@ def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
     if pinned:
         ids.append(task_id)
     path = _pinned_path(root)
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(ids), encoding="utf-8")
+    _atomic_json(path, ids)
     return ids
 
 
@@ -165,13 +162,14 @@ def load_notes(root: Path) -> dict[str, str]:
 def set_note(root: Path, task_id: str, text: str) -> dict[str, str]:
     notes = load_notes(root)
     text = (text or "").strip()
+    if len(text) > 5000:
+        raise ValueError('Notes can contain up to 5000 characters. The original note was kept.')
     if text:
-        notes[task_id] = text[:5000]
+        notes[task_id] = text
     else:
         notes.pop(task_id, None)
     path = _notes_path(root)
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(notes, ensure_ascii=False), encoding="utf-8")
+    _atomic_json(path, notes)
     return notes
 
 

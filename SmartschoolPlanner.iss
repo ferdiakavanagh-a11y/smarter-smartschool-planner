@@ -97,5 +97,6 @@ end;
 [UninstallDelete]
 ; remove the nonsecret vault reference and local planner data
 Type: files; Name: "{app}\credentials.yml"
+Type: files; Name: "{app}\credentials.recovery.bin"
 Type: filesandordirs; Name: "{app}\data"
 Type: files; Name: "{app}\dashboard.html"

@@ -30,6 +30,7 @@ MAX_ITEMS_PER_REQUEST = 40           # tasks per request
 MAX_TEXT_CHARS = 1500                # max chars per task (long texts keep their start AND end)
 MAX_DAYS_AHEAD = 120                 # max days ahead
 REQUEST_TIMEOUT_MS = 60_000          # request timeout
+SYNC_AI_BUDGET_SECONDS = 45          # one budget across all optional AI batches
 TRANSIENT_RETRY_DELAY = 3            # seconds before the one 5xx retry
 MAX_SLOT_WAIT_SECONDS = 15           # max wait for a per-minute slot
 COOLDOWN_AFTER_429_SECONDS = 65      # skip the model after a per-minute 429
@@ -120,10 +121,10 @@ class UsageLimiter:
         except OSError:
             pass
 
-    def wait_for_slot(self, model: str, est_tokens: int) -> None:
+    def wait_for_slot(self, model: str, est_tokens: int, max_wait: float = MAX_SLOT_WAIT_SECONDS) -> None:
         """Wait briefly for room on `model`; raises LimitReached if unusable now."""
         max_rpm, max_tpm, max_rpd = self.limits(model)
-        deadline = time.time() + MAX_SLOT_WAIT_SECONDS
+        deadline = time.time() + min(MAX_SLOT_WAIT_SECONDS, max_wait)
         while True:
             now = time.time()
             m = self._m(model, now)
@@ -233,21 +234,24 @@ def _generate(
                 problems.append("ran out of time")
                 raise AllModelsFailed("; ".join(problems))
             try:
-                limiter.wait_for_slot(model, est_tokens)
+                remaining = time_budget - (time.monotonic() - started) if time_budget is not None else MAX_SLOT_WAIT_SECONDS
+                limiter.wait_for_slot(model, est_tokens, max_wait=max(0, remaining))
             except LimitReached as exc:
                 problems.append(f"{model}: {exc}")
                 break
             limit_only = False
             try:
+                remaining = time_budget - (time.monotonic() - started) if time_budget is not None else REQUEST_TIMEOUT_MS / 1000
+                if remaining <= 0:
+                    raise AllModelsFailed('AI time budget reached')
+                config = {'temperature': 0 if json_mode else 0.4,
+                          'http_options': {'timeout': max(1, min(REQUEST_TIMEOUT_MS, int(remaining * 1000))), 'retry_options': {'attempts': 1}}}
+                if json_mode:
+                    config['response_mime_type'] = 'application/json'
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
-                    config=(
-                        {"response_mime_type": "application/json", "temperature": 0}
-                        if json_mode
-                        # no max_output_tokens: thinking tokens count against it and can empty the reply
-                        else {"temperature": 0.4}
-                    ),
+                    config=config,
                 )
                 limiter.record(model, est_tokens)
                 if accept is not None and not accept(response):
@@ -260,7 +264,10 @@ def _generate(
                 code = _error_code(exc)
                 if _is_transient(exc, code):
                     if attempt == 0:
-                        time.sleep(TRANSIENT_RETRY_DELAY + random.random() * 2)
+                        delay = TRANSIENT_RETRY_DELAY + random.random() * 2
+                        if time_budget is not None:
+                            delay = min(delay, max(0, time_budget - (time.monotonic() - started)))
+                        time.sleep(delay)
                         continue
                     problems.append(f"{model}: overloaded/unavailable ({code or 'timeout'})")
                     break
@@ -295,7 +302,7 @@ Rules:
 - Only give a date if the text itself states or clearly implies it, e.g. "De deadline voor deze opdracht is VRIJDAG 25 SEPTEMBER", "tegen donderdag", "date limite : lundi 5/10", "test op 3/10", "volgende week dinsdag".
 - Resolve weekday names and relative phrases against the posted date: a weekday name means its next occurrence AFTER the posted date. Use the posted date's year unless the text says otherwise.
 - If several dates appear, choose the actual deadline - not the date the task was given, not a lesson date. A time of day such as "16u10" is not a date.
-- If the text contains no deadline, or you are unsure, answer null. NEVER answer with the posted date itself and never guess.
+- If the text contains no deadline, or you are unsure, answer null. Only use the posted date itself when the text explicitly says the deadline is today. Never guess.
 
 Answer with ONLY a JSON array, one object per item, exactly in this shape:
 [{"id": 0, "due_date": "YYYY-MM-DD", "confidence": "high"}, {"id": 1, "due_date": null, "confidence": "high"}]
@@ -316,7 +323,7 @@ def _clip(text: str) -> str:
 
 
 def _cache_key(text: str, posted: date) -> str:
-    return hashlib.sha1(f"{posted.isoformat()}|{_clip(text)}".encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1(f"v2|{posted.isoformat()}|{_clip(text)}".encode("utf-8")).hexdigest()[:20]
 
 
 def _load_cache(path: Path | None) -> dict:
@@ -340,14 +347,14 @@ def _save_cache(path: Path | None, cache: dict) -> None:
 
 
 def _validated(raw_date, confidence, posted: date) -> date | None:
-    """A confident, plausible date that differs from the posted day."""
-    if not raw_date or raw_date == "null" or confidence != "high":
+    """A confident date within the allowed planning window."""
+    if not isinstance(raw_date, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw_date) or confidence != "high":
         return None
     try:
-        d = date.fromisoformat(str(raw_date)[:10])
+        d = date.fromisoformat(raw_date)
     except ValueError:
         return None
-    if d <= posted or d > posted + timedelta(days=MAX_DAYS_AHEAD):
+    if d < posted or d > posted + timedelta(days=MAX_DAYS_AHEAD):
         return None
     return d
 
@@ -358,16 +365,23 @@ def _parse_response(text: str) -> dict[int, tuple] | None:
     except (TypeError, json.JSONDecodeError):
         return None
     if isinstance(data, dict):
-        data = data.get("results") or data.get("items") or []
+        data = data.get("results") if 'results' in data else data.get('items')
     if not isinstance(data, list):
         return None
     out: dict[int, tuple] = {}
     for row in data:
         if isinstance(row, dict) and "id" in row:
             try:
-                out[int(row["id"])] = (row.get("due_date"), row.get("confidence"))
+                index = row['id']
+                if type(index) is not int:
+                    return None
+                if index in out or row.get('confidence') not in ('high', 'medium', 'low') or 'due_date' not in row:
+                    return None
+                out[index] = (row.get("due_date"), row.get("confidence"))
             except (TypeError, ValueError):
-                continue
+                return None
+        else:
+            return None
     return out
 
 
@@ -396,7 +410,7 @@ def extract_due_dates_batch(
         if not text or (SKIP_TEXT_WITHOUT_DATE_HINTS and not looks_worth_asking(text)):
             continue
         key = _cache_key(text, posted)
-        if key in cache:
+        if key in cache and (cache[key] is None or _validated(cache[key], 'high', posted) is not None):
             cached_hits += 1
             results[i] = _validated(cache[key], "high", posted) if cache[key] else None
             continue
@@ -415,6 +429,7 @@ def extract_due_dates_batch(
 
     limiter = UsageLimiter(usage_file)
     keys = list(pending)
+    deadline = time.monotonic() + SYNC_AI_BUDGET_SECONDS
     requests_made = 0
     models_used: set[str] = set()
     found = 0
@@ -432,7 +447,10 @@ def extract_due_dates_batch(
         ]
         prompt = PROMPT.replace("__ITEMS__", json.dumps(payload, ensure_ascii=False))
         try:
-            response, model_used = _generate(client, prompt, limiter)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AllModelsFailed('AI time budget reached')
+            response, model_used = _generate(client, prompt, limiter, time_budget=remaining)
             requests_made += 1
             models_used.add(model_used)
         except LimitReached as exc:
@@ -450,7 +468,7 @@ def extract_due_dates_batch(
             break
 
         parsed = _parse_response(getattr(response, "text", None))
-        if parsed is None:
+        if parsed is None or set(parsed) != set(range(len(chunk))):
             problem = "AI answered in an unreadable format - nothing was changed."
             last_problem = {"kind": "format", "detail": "unreadable response"}
             break
@@ -459,7 +477,9 @@ def extract_due_dates_batch(
                 continue  # skipped: don't cache
             posted = pending_info[k][1]
             d = _validated(parsed[n][0], parsed[n][1], posted)
-            cache[k] = d.isoformat() if d else None
+            confident_none = parsed[n][0] is None and parsed[n][1] == 'high'
+            if d is not None or confident_none:
+                cache[k] = d.isoformat() if d else None
             for idx in pending[k]:
                 results[idx] = d
             if d:

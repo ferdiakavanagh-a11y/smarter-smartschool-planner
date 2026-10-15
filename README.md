@@ -40,22 +40,21 @@ yourself? See **[BUILD_EXE.md](BUILD_EXE.md)**, or double-click
   opdracht is VRIJDAG 25 SEPTEMBER", "date limite : 5/10", "DEADLINE 05/10" -
   instead of just using the day it was posted:
   - A free built-in keyword parser (`dutch_dates.py`, Dutch/French/German/
-    English) exists but is **switched off by default** - see
-    `USE_REGEX_DEADLINE_PARSER` in `sync.py`.
+    English) is used when **Local** is selected or no Gemini key is available.
   - When a `gemini_api_key` is set, every task that still needs a date is sent
-    to Google's Gemini API - all bundled into **one request per sync** (not
-    one call per task), answers are **cached** so unchanged tasks are never
-    re-asked, and a **persistent rate limiter** keeps usage under the free-tier
+    to Google's Gemini API in batches. Confident answers are **cached**;
+    uncertain or malformed answers can be retried on a later sync, and a **persistent rate limiter** keeps usage under the free-tier
     limits even across restarts. The model is explicitly told to answer "no
     deadline found" rather than guess, and any answer that isn't unambiguously
-    *after* the posted date (or is implausibly far away) is discarded.
+    on or after the posted date (or is implausibly far away) is discarded.
+    Optional AI work has a shared 45-second request budget per sync.
   - Every AI-found date is clearly badged "AI-detected - verify" everywhere
     it appears, since it's the one part of this pipeline that isn't fully
     deterministic.
 
 ## The app
 
-Five tabs:
+Six tabs:
 - **To-Do** - upcoming tasks, grouped Today / Tomorrow / This week / Later,
   with a course filter. Check items off; it's remembered next time.
 - **Missed** - overdue tasks, but only from the last 7 days (older ones
@@ -65,6 +64,7 @@ Five tabs:
 - **All Classes** - literally every class period per day, even ones with
   no assignment attached - the closest thing to a full plain timetable.
   (Best-effort/experimental - see Known limitations below.)
+- **LVS** - pupil-follow-up notes and absences, with unread indicators.
 - **Grades** - your results, newest first: score, maximum, percentage, course,
   date, teacher, any feedback, and whether it counts towards your average.
 
@@ -133,7 +133,7 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `setup_ui.py` | First-run / "change login details" window; saves secrets in the Windows vault |
 | `sync.py` | Fetches planner data and grades, orchestrates due-date resolution |
 | `planner_details.py` | Fetches each task's real body text (title-only otherwise) |
-| `dutch_dates.py` | The free keyword deadline parser (off by default) |
+| `dutch_dates.py` | The free Local deadline parser |
 | `gemini_dates.py` | Batched AI deadline detection, with caching, fallback and rate limiting |
 | `planner_html.py` | The shared UI (used by both the app and the plain dashboard) |
 | `task_state.py` | Remembers checked-off tasks, pins, notes and display settings |
@@ -164,7 +164,12 @@ collect credentials in the app, so the installer never writes plaintext secrets.
 There is no plaintext fallback if the vault is unavailable. Uninstall removes
 this installation's vault entries. Changing computers, Windows accounts or app
 folders requires entering your details again. Malware running as your Windows
-user may still retrieve secrets. Old backups and cloud file history are not erased.
+user may still retrieve secrets. The password is bound to the approved school
+hostname in the vault; older vault entries require confirming the school and
+re-entering the password once after upgrading. Session cookies use Windows DPAPI
+encryption in `data/sessions/`; the old library authentication cache for the
+account is removed. Cached planner data is shown only for the approved account.
+Old backups and cloud file history are not erased.
 
 `credentials.yml` and everything in `data/` stay on your computer. They are
 never uploaded anywhere, and the installer never contains anyone's login. Your
@@ -172,19 +177,13 @@ details are only sent where the app needs them: your username and password go
 to Smartschool to log in, and, if you set a Gemini key, assignment text goes to
 Google for deadline detection. Treat the Gemini key like a password.
 
-## Switching the free parser back on
-`dutch_dates.py` still works and is still tested - it's just not in the
-pipeline right now, since the AI pass (working off real body text) handles
-the same job with much better recall. To use it as a free first pass before
-AI is asked (or instead of AI, if you don't set a `gemini_api_key`), open
-`sync.py` and set:
-```python
-USE_REGEX_DEADLINE_PARSER = True
-```
+## Choosing a date checker
+Choose **Local** or **Gemini** in Settings. Without an API key, Local is always
+used. You do not need to edit Python source files.
 
 ## Known limitations
 - **The detail-endpoint route is a guess.** `planner_details.py` tries a
-  short list of plausible URLs once per install and remembers whichever one
+  short list of plausible URLs and rediscovers the route if a saved route stops working and remembers whichever one
   works (see `data/planner_detail_route.json` and `data/detail_probe.log` if
   none of them do). If your school's route isn't in that list, tasks fall
   back to title-only text, and deadline detection will miss anything that

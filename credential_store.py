@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 import threading
 import uuid
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -19,6 +20,19 @@ _lock = threading.RLock()
 
 class CredentialError(ValueError):
     """Safe to display: never contains credential values."""
+
+
+def school_origin(value) -> str:
+    host = str(value or '').strip().lower()
+    parsed = urlsplit('https://' + host)
+    if not host or parsed.hostname != host or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.port:
+        raise CredentialError('Enter only your school hostname, such as yourschool.smartschool.be.')
+    return host
+
+
+def account_key(data: dict) -> str:
+    identity = [school_origin(data.get('main_url')), str(data.get('username') or '').strip()]
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
 class _Credential(ctypes.Structure):
@@ -59,7 +73,7 @@ def _read(target: str) -> dict:
     try:
         raw = ctypes.string_at(pointer.contents.CredentialBlob, pointer.contents.CredentialBlobSize)
         data = json.loads(raw.decode('utf-8'))
-        if not isinstance(data, dict) or set(data) != set(SECRET_FIELDS) or not all(isinstance(v, str) for v in data.values()):
+        if not isinstance(data, dict) or not set(SECRET_FIELDS).issubset(data) or not set(data).issubset((*SECRET_FIELDS, 'main_url')) or not all(isinstance(v, str) for v in data.values()):
             raise ValueError()
         return data
     except (ValueError, UnicodeError):
@@ -79,7 +93,7 @@ def read_config(path: Path) -> dict:
         data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
     except FileNotFoundError:
         return {}
-    except yaml.YAMLError:
+    except (yaml.YAMLError, UnicodeError):
         raise CredentialError('The login configuration is invalid. Use Change login info.') from None
     if not isinstance(data, dict):
         raise CredentialError('The login configuration is invalid. Use Change login info.')
@@ -91,6 +105,8 @@ def save_credentials(path: Path, data: dict) -> None:
     with _lock:
         config = {k: v for k, v in data.items() if k not in SECRET_FIELDS and k != 'vault_target'}
         secrets = {k: str(data.get(k) or '') for k in SECRET_FIELDS}
+        secrets['main_url'] = school_origin(data.get('main_url'))
+        config['main_url'] = secrets['main_url']
         blob = json.dumps(secrets, ensure_ascii=False).encode('utf-8')
         if len(blob) > 2560:
             raise CredentialError('Login details exceed the Windows credential storage limit.')
@@ -127,8 +143,10 @@ def save_credentials(path: Path, data: dict) -> None:
         old = data.get('vault_target')
         if isinstance(old, str) and old.startswith(_prefix(path)) and old != target:
             try:
+                from secure_session import remove_legacy_session
+                remove_legacy_session(_read(old)['username'])
                 _delete(old)
-            except CredentialError:
+            except (CredentialError, OSError):
                 pass  # Uninstall also removes orphaned entries belonging to this installation.
 
 
@@ -139,13 +157,32 @@ def load_credentials(path: Path) -> dict:
         if target:
             if not isinstance(target, str) or not target.startswith(_prefix(path)):
                 raise CredentialError('Login details belong to another installation. Use Change login info.')
-            data = {**config, **_read(target)}
+            secrets = _read(target)
+            if not secrets.get('main_url'):
+                raise CredentialError('Confirm your school address in Change login info before using saved credentials.')
+            if school_origin(config.get('main_url')) != secrets['main_url']:
+                raise CredentialError('The school address changed. Re-enter your password in Change login info to approve it.')
+            data = {**config, **secrets}
             if any(k in config for k in SECRET_FIELDS):
                 save_credentials(path, data)
             return data
         if any(k in config for k in SECRET_FIELDS):
             save_credentials(path, config)
         return config
+
+
+def load_for_setup(path: Path) -> dict:
+    """Pre-fill recovery safely, but require the password again for an unapproved origin."""
+    config = read_config(path)
+    target = config.get('vault_target')
+    if target and isinstance(target, str) and target.startswith(_prefix(path)):
+        secrets = _read(target)
+        approved = secrets.get('main_url')
+        data = {**config, **secrets}
+        if not approved or config.get('main_url') != approved:
+            data['password'] = ''
+        return data
+    return config
 
 
 def smartschool_credentials(path: Path):
@@ -170,4 +207,9 @@ def clear_credentials(path: Path) -> None:
     finally:
         api.CredFree(entries)
     for target in targets:
+        from secure_session import remove_legacy_session
+        try:
+            remove_legacy_session(_read(target)['username'])
+        except CredentialError:
+            pass  # A damaged entry must still be deleted.
         _delete(target)

@@ -262,7 +262,10 @@ class DetailFetcher:
         payload = None
         if self.template:
             payload = self._get(self.template, ctx)
-        elif not self.custom_template and element_type == "planned-assignments":
+            if payload is None and self.route_is_saved and not self.custom_template and not self._probed_this_run:
+                self.template = None
+                self.route_is_saved = False
+        if payload is None and not self.template and not self.custom_template and element_type == "planned-assignments":
             # no route yet: probe on an assignment
             self._probed_this_run = True
             for candidate in CANDIDATE_TEMPLATES:

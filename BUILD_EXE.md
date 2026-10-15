@@ -2,7 +2,7 @@
 
 ## Build
 
-1. Install Python 3.11+ and run `python -m pip install -r requirements.txt`.
+1. Install Python 3.12. The build installs `requirements-release.txt`, including pinned runtime and PyInstaller versions.
 2. Run **build_exe.bat**, or **setup_and_build.bat** to also compile the installer
    when Inno Setup 6 is installed.
 3. The build produces `dist\SmartschoolPlanner\SmartschoolPlanner.exe` and its
@@ -18,6 +18,10 @@ Builds always regenerate the spec from the current command; old single-file
 specs are not reused. You can delete `build`, `dist`, and the generated `.spec`
 after compiling the installer, but keep the root `_internal` to run the local EXE.
 
+The release workflow checks dependency compatibility and runs `release_tests/` before building.
+Run the same checks locally with `python -m unittest discover -s release_tests -v`
+(Node.js must be installed for the UI checks). Update the lock deliberately when changing dependencies.
+
 ## Installer and updates
 
 Inno Setup packages the complete `dist\SmartschoolPlanner` bundle. GitHub's
@@ -25,7 +29,8 @@ release workflow still publishes `SmartschoolPlanner-Setup.exe` and its checksum
 Existing shortcuts, install location, app identity, credentials, and data paths
 are unchanged. The existing updater downloads and verifies the installer, which
 replaces both the EXE and bundled support files. First-install and upgrade
-rendering-choice behavior is unchanged.
+rendering-choice behavior is unchanged. A separate hidden worker monitors the installer
+exit code and reopens the app with an error message if installation fails.
 
 ## Using it
 
@@ -34,7 +39,7 @@ browser chrome) showing:
 - Whatever data you already have, instantly (if you've synced before)
 - Opens the saved planner without syncing; updates are checked in the background
 - A "Sync now" button in the top-right to refresh on demand
-- Four tabs: **To-Do**, **Missed**, **Schedule**, **All Classes** (see
+- Six tabs: **To-Do**, **Missed**, **Schedule**, **All Classes**, **Grades**, **LVS** (see
   README.md for what each shows)
 
 If something goes wrong (bad credentials, no internet), the window shows the
@@ -89,6 +94,5 @@ missed - `pywebview`'s Windows backend in particular relies on `pythonnet`,
 which PyInstaller can be picky about). If the resulting .exe crashes right
 away with an import error, paste me the error - it's almost always fixed by
 adding one more `--hidden-import=...` or `--collect-all ...` flag to
-`build_exe.bat`. I can't fully test this build target without a Windows
-machine, so the first build is the real test - expect we might need one
-round of fixes based on what actually happens on your machine.
+`build_exe.bat`. Release regression checks run before packaging; test the built
+installer on a separate Windows account before publishing it.

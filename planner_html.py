@@ -579,36 +579,37 @@ var PLATFORM_ID = DATA.platform_id, USER_ID = DATA.user_id;
 DATA.todos = DATA.todos || []; DATA.days = DATA.days || []; DATA.all_classes = DATA.all_classes || [];
 function bridge(){ return (EMBEDDED && window.pywebview && window.pywebview.api) ? window.pywebview.api : null; }
 function syncNow(){ var api = bridge(); if (!api || (BOOT && BOOT.chooseRendering)) return; showLoading(); api.sync_now(); }
-function markTask(id, done){
-  var i = COMPLETED.indexOf(id);
-  if (done && i === -1) COMPLETED.push(id);
-  if (!done && i !== -1) COMPLETED.splice(i, 1);
-  var api = bridge(); if (api) api.mark_task(id, !!done);
-  render(DATA, COMPLETED, { keepScroll: true });
+var stateWriteQueue=Promise.resolve();
+function queueStateWrite(work){var result=stateWriteQueue.then(work);stateWriteQueue=result.catch(function(){});return result;}
+async function persistState(method,args,storage,value){
+  var api=bridge();
+  if(EMBEDDED){if(!api || !await api[method].apply(api,args))throw new Error('save failed');}
+  else localStorage.setItem(storage,JSON.stringify(value));
 }
+function markTask(id,done){return queueStateWrite(async function(){
+  var next=COMPLETED.filter(function(value){return value!==id;});if(done)next.push(id);
+  try{await persistState('mark_task',[id,!!done],'planner.completed',next);COMPLETED=next;render(DATA,COMPLETED,{keepScroll:true});return true;}
+  catch(e){render(DATA,COMPLETED,{keepScroll:true});showToast('Completion could not be saved. Please try again.');return false;}
+});}
 function openExternal(url){ var api = bridge(); if (api) api.open_external(url); else window.open(url, "_blank"); }
-function saveSetting(key, val){
-  SETTINGS[key] = val;
-  var api = bridge();
-  if (api) api.save_setting(key, val);
-  else { try { localStorage.setItem("planner.settings", JSON.stringify(SETTINGS)); } catch(e){} }
+function saveSetting(key,val){
+  return queueStateWrite(async function(){
+    var next=Object.assign({},SETTINGS);next[key]=val;
+    try{await persistState('save_setting',[key,val],'planner.settings',next);SETTINGS=next;return true;}
+    catch(e){showToast('This setting could not be saved. Please try again.');return false;}
+  });
 }
 function loadSetting(key){ return (key in SETTINGS) ? SETTINGS[key] : null; }
-function togglePin(id){
-  var i = PINNED.indexOf(id), on = i === -1;
-  if (on) PINNED.push(id); else PINNED.splice(i, 1);
-  var api = bridge();
-  if (api) api.pin_task(id, on);
-  else { try { localStorage.setItem("planner.pinned", JSON.stringify(PINNED)); } catch(e){} }
-  return on;
-}
-function saveNote(id, text){
-  text = (text || "").trim();
-  if (text) NOTES[id] = text; else delete NOTES[id];
-  var api = bridge();
-  if (api) api.save_note(id, text);
-  else { try { localStorage.setItem("planner.notes", JSON.stringify(NOTES)); } catch(e){} }
-}
+function togglePin(id){return queueStateWrite(async function(){
+  var on=PINNED.indexOf(id)===-1,next=PINNED.filter(function(value){return value!==id;});if(on)next.push(id);
+  try{await persistState('pin_task',[id,on],'planner.pinned',next);PINNED=next;return on;}
+  catch(e){showToast('Pin could not be saved. Please try again.');return null;}
+});}
+function saveNote(id,text){return queueStateWrite(async function(){
+  text=(text||'').trim();var next=Object.assign({},NOTES);if(text)next[id]=text;else delete next[id];
+  try{await persistState('save_note',[id,text],'planner.notes',next);NOTES=next;return true;}
+  catch(e){showToast('Note was not saved. Your text is still here; copy it or try again.');return false;}
+});}
 if (!EMBEDDED) {
   try { var _p = JSON.parse(localStorage.getItem("planner.pinned") || "[]"); if (Array.isArray(_p)) PINNED = _p; } catch(e){}
   try { var _n = JSON.parse(localStorage.getItem("planner.notes") || "{}"); if (_n && typeof _n === "object") NOTES = _n; } catch(e){}
@@ -1146,13 +1147,16 @@ function pinButton(id){
   var on = PINNED.indexOf(id) !== -1;
   return '<button class="btn-secondary" data-pin-sheet="'+esc(id)+'">'+ICON.pin.replace('<svg ','<svg class="pin-ic" ')+(on ? " Unpin from top" : " Pin to top")+'</button>';
 }
-function flushNote(){
+async function flushNote(){
   if (noteTimer) { clearTimeout(noteTimer); noteTimer = null; }
   var area = document.getElementById("noteArea");
   if (area && area.getAttribute("data-note") && (NOTES[area.getAttribute("data-note")] || "") !== area.value.trim()) {
-    saveNote(area.getAttribute("data-note"), area.value);
+    var text=area.value;
+    if(!await saveNote(area.getAttribute("data-note"),text))return false;
+    if(area.isConnected && area.value!==text)return flushNote();
     render(DATA, COMPLETED, { keepScroll: true });
   }
+  return true;
 }
 
 function openTask(id, focus){
@@ -1211,7 +1215,7 @@ async function focusAction(action){
   try {
     var api = bridge();
     if (action === 'start') {
-      flushNote(); showFocus(api?await api.focus_start(focusCandidate):{task:focusCandidate,elapsed:0,running:true,onTop:false});
+      if(!await flushNote())return; showFocus(api?await api.focus_start(focusCandidate):{task:focusCandidate,elapsed:0,running:true,onTop:false});
     } else if (action === 'pause') {
       if (api) showFocus(await api.focus_pause());
       else {var state = Object.assign({},focusSession); state.elapsed += state.running?(performance.now()-focusStamp)/1000:0; state.running = !state.running; showFocus(state);}
@@ -1222,9 +1226,7 @@ async function focusAction(action){
       lensScan();
     } else if (action === 'complete') {
       var id = focusSession.task.id;
-      if (api && !await api.mark_task(id,true)) throw new Error('Could not save completion.');
-      if (COMPLETED.indexOf(id)===-1) COMPLETED.push(id);
-      if (!api) localStorage.setItem('planner.completed',JSON.stringify(COMPLETED));
+      if (!await markTask(id,true)) throw new Error('Could not save completion.');
       document.getElementById('focusComplete').disabled = true;
       document.getElementById('focusStatus').textContent = 'Task marked complete. You can continue focusing or exit.';
     } else if (action === 'end') {
@@ -1307,9 +1309,9 @@ function showSheet(title, body, link, reuse){
   setInert(true); sheetEl.focus({preventScroll:true});
   return rebuilt;
 }
-function hideSheet(){
+async function hideSheet(){
   if (!closeSheetNotice()) return;
-  flushNote();
+  if(!await flushNote())return;
   if (!sheetEl.classList.contains("show")) return;
   cancelAnimationFrame(sheetAnim);
   // transitions resume from wherever the sheet is right now (no jump)
@@ -1318,9 +1320,9 @@ function hideSheet(){
   document.body.classList.remove("sheet-open"); sheetEl.classList.remove("show"); scrimEl.classList.remove("show");
   setInert(false); restoreFocus();
 }
-function finishClose(){
+async function finishClose(){
   if (!closeSheetNotice()) return;
-  flushNote(); cancelAnimationFrame(sheetAnim);
+  if(!await flushNote()){sheetResetStyles();return;} cancelAnimationFrame(sheetAnim);
   sheetEl.style.transition = "none"; scrimEl.style.transition = "none";
   document.body.classList.remove("sheet-open"); sheetEl.classList.remove("show"); scrimEl.classList.remove("show");
   sheetEl.style.transform = ""; scrimEl.style.opacity = "";
@@ -1440,6 +1442,12 @@ function showUpdatePrompt(info){
   document.getElementById("updateLater").textContent = info.failed ? "Close" : "Not now";
   document.getElementById("sheetClose").disabled = !!info.busy;
   sheetEl.setAttribute("aria-busy", info.busy ? "true" : "false");
+  return true;
+}
+function showUpdateFailure(){
+  if(!canShowNotice())return false;
+  showSheet('Update could not be installed','<div class="detail-block"><p class="detail-desc">The installer did not finish successfully. The app has been reopened. Try the update again, or download the installer from the project’s GitHub Releases page.</p></div><button class="btn-secondary" id="updateFailureClose">Close</button>');
+  document.getElementById('updateFailureClose').onclick=hideSheet;
   return true;
 }
 function releaseNotesHTML(text){
@@ -1609,11 +1617,11 @@ function openSettings(){
   refreshDateChecker();
   if (!rebuilt) return;
   var slider = document.getElementById("glassSlider");
-  slider.addEventListener("input", function(){ var v = parseInt(slider.value,10); applyGlassLevel(v); saveSetting("glassLevel", v); });
+  slider.addEventListener("input", async function(){ var v = parseInt(slider.value,10); applyGlassLevel(v); if(!await saveSetting("glassLevel", v)){slider.value=currentLevel();applyGlassLevel(currentLevel());} });
   var tog = document.getElementById("motionToggle");
-  tog.addEventListener("click", function(){ var on = !tog.classList.contains("on"); tog.classList.toggle("on", on); document.body.classList.toggle("reduce-motion", on); saveSetting("reduceMotion", on); tog.setAttribute("aria-checked", on); });
+  tog.addEventListener("click", async function(){ var on = !tog.classList.contains("on"); if(!await saveSetting("reduceMotion", on))return; tog.classList.toggle("on", on); document.body.classList.toggle("reduce-motion", on); tog.setAttribute("aria-checked", on); });
   var bgt = document.getElementById("bgToggle");
-  bgt.addEventListener("click", function(){ var on = !bgt.classList.contains("on"); bgt.classList.toggle("on", on); document.body.classList.toggle("static-bg", !on); saveSetting("animatedBg", on); bgt.setAttribute("aria-checked", on); });
+  bgt.addEventListener("click", async function(){ var on = !bgt.classList.contains("on"); if(!await saveSetting("animatedBg", on))return; bgt.classList.toggle("on", on); document.body.classList.toggle("static-bg", !on); bgt.setAttribute("aria-checked", on); });
   Array.prototype.forEach.call(document.querySelectorAll("#sheetBody .toggle"), function(el){ el.addEventListener("keydown", function(e){ if (e.key === " " || e.key === "Enter") { e.preventDefault(); el.click(); } }); });
 }
 
@@ -1623,20 +1631,21 @@ function applyScheme(){
   document.documentElement.setAttribute("data-scheme", light ? "light" : "dark");
   applyGlassLevel(currentLevel());
 }
-function setTextSize(v){
-  saveSetting("textSize", v);
+async function setTextSize(v){
+  if(!await saveSetting("textSize", v))return;
   if (v === "s" || v === "l") document.documentElement.setAttribute("data-text", v); else document.documentElement.removeAttribute("data-text");
   document.querySelectorAll("[data-text-opt]").forEach(function(el){ el.classList.toggle("active", el.dataset.textOpt === v); });
 }
-function setScheme(m){
-  noTrans(function(){ saveSetting("scheme", m); applyScheme(); });
+async function setScheme(m){
+  if(!await saveSetting("scheme", m))return;
+  noTrans(applyScheme);
   document.querySelectorAll("[data-scheme-opt]").forEach(function(el){ el.classList.toggle("active", el.dataset.schemeOpt === m); });
 }
 function noTrans(fn){ var r = document.documentElement; r.classList.add("no-trans"); fn(); void r.offsetHeight; requestAnimationFrame(function(){ requestAnimationFrame(function(){ r.classList.remove("no-trans"); }); }); }
-function setStyle(style){
+async function setStyle(style){
+  if(!await saveSetting("style", style))return;
   noTrans(function(){
     document.documentElement.setAttribute("data-style", style);
-    saveSetting("style", style);
     applyGlassLevel(currentLevel());
     document.querySelectorAll("[data-style-opt]").forEach(function(el){ el.classList.toggle("active", el.dataset.styleOpt===style); });
   });
@@ -1825,7 +1834,7 @@ document.getElementById("sheet-backdrop").addEventListener("click", hideSheet);
 document.addEventListener("keydown", function(e){ if (e.key==="Escape") hideSheet(); });
 
 function openSmartschool(){ var url = sheetLink || (DATA.main_url ? "https://" + DATA.main_url + "/planner" : null); if (url) openExternal(url); }
-document.getElementById("scroll").addEventListener("click", function(e){
+document.getElementById("scroll").addEventListener("click", async function(e){
   var readAll=e.target.closest('[data-lvs-read-all]');if(readAll){markAllLvsRead(readAll);return;}
   var absence=e.target.closest('[data-lvs-absence]');if(absence){openLvsAbsence(absence.dataset.lvsAbsence);return;}
   var note = e.target.closest('[data-lvs-note]'); if (note) {openLvsNote(note.dataset.lvsNote); return;}
@@ -1833,14 +1842,14 @@ document.getElementById("scroll").addEventListener("click", function(e){
   if (focus) {e.stopPropagation(); openTask(focus.dataset.focusId,true); return;}
   if (e.target.closest("[data-sync-now]")) { syncNow(); return; }
   var pin = e.target.closest("[data-pin]");
-  if (pin) { e.stopPropagation(); togglePin(pin.dataset.pin); render(DATA, COMPLETED, { keepScroll: true }); return; }
+  if (pin) { e.stopPropagation(); await togglePin(pin.dataset.pin); render(DATA, COMPLETED, { keepScroll: true }); return; }
   if (e.target.closest("[data-toggle-completed]")) { completedOpen = !completedOpen; render(DATA, COMPLETED, { keepScroll: true }); return; }
   var chk = e.target.closest("[data-check]");
   if (chk) {
     e.stopPropagation();
     var id = chk.dataset.check, now = COMPLETED.indexOf(id)===-1, row = chk.closest(".task-row");
-    if (now && row && (activeTab==="todo" || activeTab==="missed")) { chk.classList.add("done"); row.classList.add("leaving"); setTimeout(function(){ markTask(id, true); showToast("Marked as done", function(){ markTask(id, false); }); }, 260); }
-    else { markTask(id, now); if (now) showToast("Marked as done", function(){ markTask(id, false); }); }
+    if (now && row && (activeTab==="todo" || activeTab==="missed")) { chk.classList.add("done"); row.classList.add("leaving"); setTimeout(async function(){ if(await markTask(id, true))showToast("Marked as done", function(){ markTask(id, false); }); }, 260); }
+    else { var saved=await markTask(id, now); if (saved && now) showToast("Marked as done", function(){ markTask(id, false); }); }
     return;
   }
   var td = e.target.closest("[data-detail='task']"); if (td) { openTask(td.dataset.id); return; }
@@ -1852,13 +1861,14 @@ document.getElementById("sheetBody").addEventListener("input", function(e){
   if (noteTimer) clearTimeout(noteTimer);
   noteTimer = setTimeout(flushNote, 500);
 });
-document.getElementById("sheetBody").addEventListener("click", function(e){
+document.getElementById("sheetBody").addEventListener("click", async function(e){
   var diagnostics=e.target.closest('[data-copy-sync-diagnostics]');if(diagnostics){copySyncDiagnostics(diagnostics);return;}
   var checker = e.target.closest('[data-date-checker]'); if (checker) {setDateChecker(checker.dataset.dateChecker); return;}
   if (e.target.closest('[data-change-login]')) {
     var api = bridge();
     if (api && api.open_setup) {
-      hideSheet(); showLoading('Waiting for login details...');
+      if(!await flushNote())return;
+      await hideSheet(); showLoading('Waiting for login details...');
       Promise.resolve(api.open_setup()).catch(function(){hideState();showToast('Could not open login settings. Please try again.');});
     }
     return;
@@ -1868,7 +1878,7 @@ document.getElementById("sheetBody").addEventListener("click", function(e){
   var ou = e.target.closest("[data-open-url]"); if (ou) { openExternal(ou.getAttribute("data-open-url")); return; }
   var ps = e.target.closest("[data-pin-sheet]");
   if (ps) {
-    var on = togglePin(ps.dataset.pinSheet);
+    var on = await togglePin(ps.dataset.pinSheet); if(on===null)return;
     ps.lastChild.textContent = on ? " Unpin from top" : " Pin to top";
     render(DATA, COMPLETED, { keepScroll: true });
     return;

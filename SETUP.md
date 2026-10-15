@@ -14,7 +14,7 @@ details** in the Start Menu.
 ## Running from source
 
 ### 1. Install Python
-Get Python 3.11+ from python.org if you don't have it. During install, tick
+Get Python 3.12 or newer from python.org if you don't have it. During install, tick
 "Add python.exe to PATH".
 
 ### 2. Get the project files
@@ -44,7 +44,15 @@ Secrets (username, password, security answer and optional Gemini key) are saved
 in Windows Credential Manager, under your Windows account. `credentials.yml`
 contains only the school address, advanced configuration and a vault reference.
 Existing plaintext files are migrated automatically at startup or sync, after
-verifying the vault entry. There is no plaintext storage fallback.
+verifying the vault entry. There is no plaintext storage fallback. The vault also binds
+your password to the approved school hostname. Upgrading from an older vault format
+requires confirming the school and re-entering the password once. Changing the hostname
+in YAML cannot redirect a saved password.
+
+Session cookies are encrypted with Windows DPAPI under your Windows account and
+saved in `data/sessions/`. The old library cookies and user cache for the account are
+removed. Malformed YAML can be repaired in the login editor; the original is kept
+as an encrypted `credentials.recovery.bin` file.
 
 Use Settings > Change login info to edit secrets. A Gemini key is optional;
 without one, date checking uses Local. Moving the app folder, changing Windows
@@ -56,12 +64,13 @@ Windows Home is supported; other operating systems cannot save credentials.
 ```
 python desktop_app.py
 ```
-A window opens: your planner, with five tabs (To-Do, Missed, Schedule, All
-Classes, Grades), checkboxes you can tick off, search, pinning, private notes,
+A window opens: your planner, with six tabs (To-Do, Missed, Schedule, All
+Classes, Grades, LVS), checkboxes you can tick off, search, pinning, private notes,
 and links out to Smartschool.
 
 The app never syncs on its own when you open it. It shows the last saved data
-straight away. Click the sync button to log in and fetch fresh data (the very
+straight away when it belongs to the approved account. After changing accounts,
+old data is hidden until that account syncs successfully. Click the sync button to log in and fetch fresh data (the very
 first sync runs automatically right after you save your details in the setup
 window). A sync takes a few seconds.
 

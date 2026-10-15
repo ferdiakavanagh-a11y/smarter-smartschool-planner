@@ -52,7 +52,7 @@ def normalize_security(value: str):
 
 
 def load_existing(path: Path) -> dict:
-    return credential_store.load_credentials(path)
+    return credential_store.load_for_setup(path)
 
 
 def restrict_permissions(path: Path) -> None:
@@ -73,8 +73,15 @@ def restrict_permissions(path: Path) -> None:
         pass
 
 
-def write_credentials(path: Path, username, password, main_url, mfa="", gemini_key="") -> None:
-    data = credential_store.read_config(path)  # keep advanced keys even when a vault entry is missing
+def write_credentials(path: Path, username, password, main_url, mfa="", gemini_key="", recover=False) -> None:
+    try:
+        data = credential_store.read_config(path)
+    except credential_store.CredentialError:
+        if not recover:
+            raise
+        from windows_security import protect, atomic_bytes
+        atomic_bytes(path.with_suffix('.recovery.bin'), protect(path.read_bytes()))
+        data = {}
     data.update(
         {
             "username": username.strip(),
@@ -163,7 +170,14 @@ def run_setup(path: Path) -> bool:
             messagebox.showerror("Security answer", err)
             return
         try:
-            write_credentials(path, v_user.get(), v_pass.get(), v_url.get(), mfa_value, v_key.get())
+            recover = False
+            try:
+                credential_store.read_config(path)
+            except credential_store.CredentialError:
+                recover = messagebox.askyesno('Repair login configuration', 'Replace the damaged configuration? An encrypted recovery copy will be kept on this computer.', parent=root)
+                if not recover:
+                    return
+            write_credentials(path, v_user.get(), v_pass.get(), v_url.get(), mfa_value, v_key.get(), recover=recover)
         except Exception:  # Never include secret-bearing exception payloads in UI or logs.
             messagebox.showerror("Could not save", "Windows could not securely save your details. Existing details were kept. Check Credential Manager and try again.")
             return

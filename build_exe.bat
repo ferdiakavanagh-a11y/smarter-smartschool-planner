@@ -3,14 +3,17 @@ REM Builds SmartschoolPlanner.exe from desktop_app.py. Rerun after any .py chang
 
 cd /d "%~dp0"
 
-echo Installing/updating PyInstaller...
-python -m pip install pyinstaller --upgrade
+echo Installing locked runtime and build dependencies...
+python -m pip install --no-deps -r requirements-release.txt
 if errorlevel 1 (
     echo.
-    echo ERROR: Could not install or update PyInstaller.
+    echo ERROR: Could not install the locked release dependencies.
     pause
     exit /b 1
 )
+
+python -m pip check
+if errorlevel 1 exit /b 1
 
 echo.
 echo Building SmartschoolPlanner.exe ...

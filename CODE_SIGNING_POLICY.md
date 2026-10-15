@@ -38,23 +38,23 @@ multi-factor authentication, and access is removed when it is no longer needed.
 usage statistics, no analytics, no crash reports, no login details, no assignment data. There is
 no developer server, and the app contains no tracking or telemetry.
 
-This program will not transfer any information to other networked systems unless specifically
-requested by the user or the person installing or operating it.
+**Where your data is kept:** login secrets live in Windows Credential Manager under your
+Windows account. Nonsecret configuration, planner data, grades, LVS, notes, pins,
+completion and settings stay in the app folder. Session cookies are encrypted with
+Windows DPAPI in `data/sessions/`. Legacy authentication cache files for the account
+are removed. Uninstall removes this installation's vault entries and local files;
+backups and cloud file history are outside the app's control.
 
-**Where your data is kept:** everything the app saves is stored in files on your own computer.
-Your login details, planner data, grades, notes, pinned and checked-off tasks and settings are kept
-in the folder the app is installed in, and uninstalling the app removes them. The Smartschool
-login library also keeps a login-session cache (so you don't have to log in on every sync) in the
-`.cache\smartschool` folder of your Windows user profile. That folder also stays on your computer.
+**Network connections:**
 
-**The only places the app connects to, and only because the user asks it to:**
-
-1. **Your own Smartschool address**, to log in and fetch your planner. This is the app's purpose,
-   and your username and password are sent only there.
-2. **Google's Gemini API, only if you add your own Gemini API key.** In that case, the text of your
-   assignments (task title, the "Info voor de leerling" text and the date it was posted) is sent to
-   Google to find deadlines written in the text. Your username, password and school address are
-   not sent. Without a key, nothing is ever sent to Google.
+1. **Your approved Smartschool address**, when syncing or loading LVS details.
+   Your username and password are sent only to that approved address.
+2. **Google's Gemini API**, when Gemini is selected and you supply an API key.
+   Assignment titles, instructions and posted dates are sent to find deadlines.
+   Login credentials and school addresses are not included in that request.
+3. **GitHub**, automatically on startup to check for new app releases and read
+   release notes. Installing an offered update downloads the installer and checksum
+   from GitHub. These requests contain no planner or login data.
 
 Links you click open in your own web browser. The app does not load fonts, scripts or images from
 the internet.

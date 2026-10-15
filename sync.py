@@ -40,17 +40,16 @@ import planner_details
 import app_errors
 import task_state
 import credential_store
+from secure_session import SecureSmartschool
 from version import __version__
 
 _regex_active = False  # resolved from the saved choice and key at the start of each sync
 _run_lock = threading.Lock()
 
 
-class TimeoutSmartschool(Smartschool):
-    def _make_traced_request(self, request_method, method, url, **kwargs):
-        # This also covers the library's login/MFA requests, which bypass request().
-        kwargs.setdefault('timeout', (10, 30))
-        return super()._make_traced_request(request_method, method, url, **kwargs)
+class TimeoutSmartschool(SecureSmartschool):
+    def __init__(self, creds):
+        super().__init__(creds, ROOT)
 
 
 def serial_sync(function):
@@ -202,35 +201,51 @@ def assign_task_ids(todos, days, previous, account):
     def semantic(task):
         return tuple(str(task.get(k) or '').strip() for k in ('course', 'type', 'description', 'posted_date'))
 
-    def identity(task):
+    def server_id(task):
         server = task.get('source_id')
+        if server and str(server).startswith('future:'):
+            server = str(server)[7:]
         if not server and task.get('element_source') == 'planner_api':
             server = task.get('moment_id')
+        return server
+
+    def identity(task):
+        server = server_id(task)
         value = ['server', str(server)] if server else ['content', *semantic(task)]
         return hashlib.sha256(json.dumps([account, value], ensure_ascii=False).encode('utf-8')).hexdigest()
 
-    old = {}
+    old, server_owners = {}, {}
     for task in previous.get('todos', []):
         if task.get('id'):
-            old.setdefault(semantic(task), set()).add(task['id'])
+            if not server_id(task):
+                old.setdefault(semantic(task), set()).add(task['id'])
             registry.setdefault(identity(task), task['id'])
+            if server_id(task):
+                server_owners.setdefault(task['id'], set()).add(identity(task))
 
+    identities = {}
+    for task in todos:
+        identities.setdefault(semantic(task), set()).add(identity(task))
+    consumed = {registry[identity(task)] for task in todos if identity(task) in registry}
+    claimed = {}
     for task in todos:
         key = identity(task)
-        candidates = old.get(semantic(task), set())
+        candidates = old.get(semantic(task), set()) - consumed
         if key not in registry:
-            registry[key] = next(iter(candidates)) if len(candidates) == 1 else key[:24]
+            registry[key] = next(iter(candidates)) if len(candidates) == 1 and len(identities[semantic(task)]) == 1 else key[:24]
+            consumed.add(registry[key])
+        candidate = registry[key]
+        owners = server_owners.get(candidate, set())
+        if len(owners) > 1:
+            registry[key] = key  # An already merged state cannot safely be attributed to either task.
+        elif (owners and key not in owners) or (candidate in claimed and claimed[candidate] != key):
+            registry[key] = key[:24]
+        claimed[registry[key]] = key
         task['id'] = registry[key]
 
-    merged, cross_source, aliases = {}, {}, {}
+    merged, aliases = {}, {}
     for task in todos:
         key = task['id']
-        signature = semantic(task)
-        other = cross_source.get(signature)
-        if other and other['source'] != task.get('source') and ('future_tasks' in (other['source'], task.get('source'))):
-            key = other['id']
-            for old_id in old.get(signature, set()):
-                aliases[old_id] = key
         if key in merged:
             aliases[task['id']] = key
             registry[identity(task)] = key
@@ -245,7 +260,6 @@ def assign_task_ids(todos, days, previous, account):
             target['id'] = key
         else:
             merged[key] = task
-        cross_source.setdefault(signature, merged[key])
 
     for day in days:
         for event in day['events']:
@@ -745,7 +759,7 @@ def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> dict 
             continue
         for entry in p["entries"]:
             entry["due_date"] = result_date.isoformat()
-            entry["due_date_corrected"] = True
+            entry["due_date_corrected"] = result_date != p['posted']
             entry["due_date_source"] = "ai"
 
     problem = gemini_dates.last_problem
@@ -896,6 +910,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     detail_url_override = other_info.get("planner_detail_url") or None
 
     main_url = str(getattr(creds, "main_url", "") or "")
+    current_account = credential_store.account_key({'main_url': main_url, 'username': creds.username})
     bad_address = app_errors.address_problem(main_url)
     if bad_address:
         raise app_errors.SyncError(bad_address["kind"], bad_address["title"], bad_address["message"], bad_address["hint"])
@@ -944,7 +959,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     cutoff = today + timedelta(days=days_ahead)
     try:
         previous = json.loads(OUTPUT_FILE.read_text(encoding='utf-8'))
-        if user_id is None or not isinstance(previous, dict) or previous.get('main_url') != main_url or previous.get('user_id') != user_id:
+        if user_id is None or not isinstance(previous, dict) or previous.get('account_key') != current_account or previous.get('main_url') != main_url or previous.get('user_id') != user_id:
             previous = {}
     except (OSError, ValueError):
         previous = {}
@@ -1074,6 +1089,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     assignment_types = fetch_assignment_types(session)
 
     output = {
+        "account_key": current_account,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "main_url": creds.main_url,
         "platform_id": platform_id,
@@ -1098,6 +1114,8 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         },
     }
 
+    if credential_store.account_key(credential_store.load_credentials(ROOT / 'credentials.yml')) != current_account:
+        raise ValueError('Login details changed during sync. Please sync again.')
     write_snapshot(OUTPUT_FILE, output)
     print(f"Done. Wrote {OUTPUT_FILE}")
     return output

@@ -170,7 +170,14 @@ def _candidates(snippet: str, reference_date: date) -> list[tuple[int, int, date
             continue
 
     for m in WEEKDAY_NAME.finditer(snippet):
-        found.append((m.start(), m.end(), _next_weekday_after(reference_date, DUTCH_WEEKDAYS[m.group(1).lower()])))
+        weekday = DUTCH_WEEKDAYS[m.group(1).lower()]
+        before = snippet[max(0, m.start() - 35):m.start()]
+        after = snippet[m.end():m.end() + 25]
+        if re.search(r'(?:volgende\s+week|next\s+week)\s*$', before, re.I) or re.match(r'\s+(?:volgende\s+week|next\s+week)\b', after, re.I):
+            resolved = reference_date - timedelta(days=reference_date.weekday()) + timedelta(days=7 + weekday)
+        else:
+            resolved = _next_weekday_after(reference_date, weekday)
+        found.append((m.start(), m.end(), resolved))
 
     return found
 
