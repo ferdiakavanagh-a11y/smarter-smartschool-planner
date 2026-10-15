@@ -1,8 +1,10 @@
 import base64
 from datetime import date
 import json
+import os
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -74,6 +76,11 @@ class DatesUpdatesTests(unittest.TestCase):
             popen.side_effect=lambda *args, **kwargs: status.write_text('{"status":"running"}')
             updater.launch_installer(root/"installer's.exe",root)
             args=popen.call_args.args[0]
+            options=popen.call_args.kwargs
+            self.assertTrue(options['creationflags'] & updater.subprocess.CREATE_NO_WINDOW)
+            self.assertFalse(options['creationflags'] & updater.subprocess.DETACHED_PROCESS)
+            self.assertEqual(options['stdin'],updater.subprocess.DEVNULL)
+            self.assertEqual(options['stderr'],updater.subprocess.STDOUT)
             script=base64.b64decode(args[-1]).decode('utf-16-le')
             self.assertIn('-PassThru -Wait',script)
             self.assertIn('installer\'\'s.exe',script)
@@ -89,3 +96,30 @@ class DatesUpdatesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(updater.subprocess, 'Popen', return_value=Mock(poll=lambda: 1)):
             with self.assertRaises(updater.UpdateError):
                 updater.launch_installer(Path(folder)/'fake.exe',Path(folder))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell monitor')
+    def test_real_monitor_reports_stub_installer_exit(self):
+        # Harmless batch files exercise the worker without installing or closing anything.
+        for code in (0, 7):
+            with self.subTest(code=code), tempfile.TemporaryDirectory(prefix="monitor's space ") as folder:
+                root=Path(folder)
+                installer=root/'stub.cmd'
+                installer.write_text(f'@exit /b {code}\n')
+                workers=[]
+                real_popen=updater.subprocess.Popen
+                def spawn(*args, **kwargs):
+                    worker=real_popen(*args, **kwargs)
+                    workers.append(worker)
+                    return worker
+                with patch.object(updater.subprocess,'Popen',side_effect=spawn):
+                    updater.launch_installer(installer,root)
+                result=root/'data'/'install_result.json'
+                deadline=time.monotonic()+15
+                while time.monotonic()<deadline:
+                    status=json.loads(result.read_text(encoding='utf-8-sig'))
+                    if status['status']!='running':
+                        break
+                    time.sleep(0.1)
+                self.assertEqual(status,{'status':'ok' if code==0 else 'failed','code':code})
+                # The failure branch tries to reopen the absent app; let it finish before cleanup.
+                workers[0].wait(timeout=15)

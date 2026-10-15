@@ -200,16 +200,22 @@ if ($code -ne 0) {{ Start-Process -FilePath {literal(root / 'SmartschoolPlanner.
 """
     encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
     env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    worker = subprocess.Popen(  # noqa: S603
-        [str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'),
-         '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-        env=env, creationflags=flags, close_fds=True,
-    )
+    # Windows PowerShell may exit without executing its script with DETACHED_PROCESS.
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    log_path = result.parent / 'install_monitor.log'
+    with log_path.open('wb') as log:
+        worker = subprocess.Popen(  # noqa: S603
+            [str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'),
+             '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+            env=env, creationflags=flags, close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        )
     deadline = time.monotonic() + 5
     while not result.exists():
-        if worker.poll() is not None or time.monotonic() >= deadline:
-            raise UpdateError('The installer monitor could not start. Please try again.')
+        code = worker.poll()
+        if code is not None or time.monotonic() >= deadline:
+            reason = f'exit code {code}' if code is not None else 'startup timed out'
+            raise UpdateError(f'The installer monitor could not start ({reason}). See data/install_monitor.log.')
         time.sleep(0.05)
 
 
