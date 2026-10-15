@@ -308,19 +308,46 @@ _fetch_errors: dict[str, Exception] = {}
 _planner_diagnostics: dict[str, dict] = {}
 
 
+def skipped_record_summary(raw) -> dict:
+    """Only retain timing and the API type identifier, never event content."""
+    summary = {'date': 'unknown', 'start': 'unknown', 'event_type': 'unknown'}
+    if not isinstance(raw, dict):
+        return summary
+    period = raw.get('period')
+    if isinstance(period, dict):
+        start = period.get('dateTimeFrom', period.get('date_time_from'))
+        if isinstance(start, str) and _ISO_TS_RE.fullmatch(start):
+            try:
+                summary['date'] = date.fromisoformat(start[:10]).isoformat()
+                if 'T' in start or ' ' in start:
+                    summary['start'] = datetime.fromisoformat(start).strftime('%H:%M')
+            except ValueError:
+                summary['date'] = summary['start'] = 'unknown'
+    event_type = raw.get('plannedElementType', raw.get('planned_element_type'))
+    if isinstance(event_type, str) and re.fullmatch(r'[a-z][a-z0-9-]{0,47}', event_type):
+        summary['event_type'] = event_type
+    return summary
+
+
 def parse_planner_records(raw_elements, source: str):
     """Keep valid records and record schema failures without storing student content."""
     if not isinstance(raw_elements, list):
         _planner_diagnostics[source] = {'status': 'invalid_response', 'error': 'ExpectedList'}
         raise ValueError('Planner returned an unexpected response format')
-    status = {'status': 'ok', 'received': len(raw_elements), 'parsed': 0, 'skipped': 0, 'schema_errors': []}
+    status = {'status': 'ok', 'received': len(raw_elements), 'parsed': 0, 'skipped': 0, 'ignored_free_days': 0, 'schema_errors': [], 'skipped_records': []}
     _planner_diagnostics[source] = status
     for raw in raw_elements:
+        # Free-day markers have no lesson organisers and are not classes or tasks.
+        if isinstance(raw, dict) and raw.get('plannedElementType', raw.get('planned_element_type')) == 'planned-lesson-free-days':
+            status['ignored_free_days'] += 1
+            continue
         try:
             element = PlannedElement(**raw)
         except (ValueError, TypeError) as exc:
             status['skipped'] += 1
             status['status'] = 'partial'
+            if len(status['skipped_records']) < 12:
+                status['skipped_records'].append(skipped_record_summary(raw))
             # Pydantic exception strings include input values; store field names and error codes only.
             from pydantic import ValidationError
             if isinstance(exc, ValidationError):
@@ -331,7 +358,7 @@ def parse_planner_records(raw_elements, source: str):
             continue
         status['parsed'] += 1
         yield raw, element
-    if raw_elements and not status['parsed']:
+    if status['skipped'] and not status['parsed']:
         status['status'] = 'failed'
         raise ValueError('All planner records failed validation')
 
@@ -596,6 +623,8 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
             _planner_diagnostics['timetable']['filter'] = types_guess or 'all'
             if parsed_elements:
                 break
+            if _planner_diagnostics['timetable']['ignored_free_days']:
+                return {}  # A response containing only free days is a valid empty timetable.
             empty_response = True
         except Exception as exc:  # noqa: BLE001 - next guess
             last_exc = exc

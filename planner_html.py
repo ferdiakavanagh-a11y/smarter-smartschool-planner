@@ -1571,8 +1571,14 @@ function syncDiagnosticsText(){
     var source=(planner.sources||{})[name];if(!source)return;
     var clean={};
     ['status','error'].forEach(function(key){if(typeof source[key]==='string')clean[key]=source[key].slice(0,80);});
-    ['received','parsed','skipped'].forEach(function(key){if(Number.isFinite(source[key]))clean[key]=source[key];});
+    ['received','parsed','skipped','ignored_free_days'].forEach(function(key){if(Number.isFinite(source[key]))clean[key]=source[key];});
     clean.schema_errors=(source.schema_errors||[]).slice(0,12).map(function(item){return {field:String(item.field||'').slice(0,120),type:String(item.type||'').slice(0,80)};});
+    clean.skipped_records=(Array.isArray(source.skipped_records)?source.skipped_records:[]).slice(0,12).map(function(item){
+      item=item||{};
+      return {date:typeof item.date==='string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date)?item.date:'unknown',
+        start:typeof item.start==='string' && /^\d{2}:\d{2}$/.test(item.start)?item.start:'unknown',
+        event_type:typeof item.event_type==='string' && /^[a-z][a-z0-9-]{0,47}$/.test(item.event_type)?item.event_type:'unknown'};
+    });
     sources[name]=clean;
   });
   function events(days){return (days||[]).reduce(function(total,day){return total+(day.events||[]).length;},0);}
@@ -1612,7 +1618,7 @@ function openSettings(){
     (DATA.main_url ? '<div class="setting-group"><h4>Account</h4><div class="detail-list">'+rows([["School",DATA.main_url]])+'</div></div>'+
     '<button class="btn-primary" data-external="1">'+ICON.ext+' Open in Smartschool</button>' : "");
   if (EMBEDDED) body += '<div class="setting-group"><button class="btn-secondary" data-change-login="1">Change login info</button></div>';
-  body += '<div class="setting-group"><h4>Sync support</h4><button class="btn-secondary" data-copy-sync-diagnostics>Copy sync diagnostics</button><p class="detail-desc" id="syncDiagnosticsStatus" role="status">Copies counts and technical error fields only. No login details, school address, lesson text or LVS content.</p><textarea id="syncDiagnosticsReport" class="note-area" aria-label="Sync diagnostics report" readonly hidden spellcheck="false"></textarea></div>';
+  body += '<div class="setting-group"><h4>Sync support</h4><button class="btn-secondary" data-copy-sync-diagnostics>Copy sync diagnostics</button><p class="detail-desc" id="syncDiagnosticsStatus" role="status">Copies counts, technical error fields, and dates, start times and event types for up to 12 skipped entries per source. No login details, school address, lesson text or LVS content.</p><textarea id="syncDiagnosticsReport" class="note-area" aria-label="Sync diagnostics report" readonly hidden spellcheck="false"></textarea></div>';
   var rebuilt = showSheet("Settings", body, null, true);
   refreshDateChecker();
   if (!rebuilt) return;
