@@ -7,8 +7,12 @@ from __future__ import annotations
 import html as html_lib
 import json
 import re
+import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote, urlsplit
+
+from windows_security import atomic_bytes
 
 # placeholders: {id} element UUID, {platform_id}/{user_id}, {type} e.g. "planned-assignments", {date}
 CANDIDATE_TEMPLATES = [
@@ -27,7 +31,48 @@ CANDIDATE_TEMPLATES = [
 
 # keys likely holding task text
 # bump when CANDIDATE_TEMPLATES changes so an old "nothing worked" result is retried
-PROBE_VERSION = 2
+PROBE_VERSION = 3
+
+
+def failure_kind(exc: Exception) -> str:
+    """Only identified transport/service outages permit reuse of private cached data."""
+    from requests.exceptions import ConnectionError, Timeout
+    response = getattr(exc, 'response', None)
+    if response is None and len(exc.args) > 1:
+        response = exc.args[1]
+    status = getattr(response, 'status_code', None)
+    if not isinstance(status, int):
+        status = getattr(exc, 'status_code', None)
+    if status in (401, 403, 410):
+        return 'denied'
+    if status == 404:
+        return 'unavailable'
+    if status in (408, 429, 500, 502, 503, 504) or isinstance(exc, (ConnectionError, Timeout, TimeoutError)):
+        return 'transient'
+    return 'invalid'
+
+
+class DetailBudget:
+    """Shared serial detail allowance; cancellation never touches the authenticated session."""
+    def __init__(self, seconds=45, max_requests=150):
+        self.seconds = seconds
+        self.deadline = None
+        self.remaining_requests = max_requests
+        self.cancelled = False
+
+    def timeout(self):
+        from urllib3.util import Timeout
+        now = time.monotonic()
+        if self.deadline is None:
+            self.deadline = now + self.seconds
+        remaining = self.deadline - now
+        if self.cancelled or remaining <= 0 or self.remaining_requests <= 0:
+            raise TimeoutError('Detail budget exhausted')
+        self.remaining_requests -= 1
+        return Timeout(total=min(10, remaining), connect=min(5, remaining), read=min(10, remaining))
+
+    def cancel(self):
+        self.cancelled = True
 
 _TEXTY_KEYS = (
     "description", "content", "text", "body", "info", "instruction",
@@ -175,6 +220,10 @@ class DetailFetcher:
         self.route_is_saved = False  # route came from the saved file
         self._type_ok: dict[str, int] = {}
         self._type_fail: dict[str, int] = {}
+        self._type_failure: dict[str, str] = {}
+        self.budget = DetailBudget()
+        self.failures: dict[str, str] = {}
+        self._last_failure = 'invalid'
         self._load_state()
 
     # -- saved route --
@@ -184,9 +233,11 @@ class DetailFetcher:
             return
         try:
             state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             return
-        if state.get("template"):
+        if not isinstance(state, dict):
+            return
+        if isinstance(state.get("template"), str) and state['template']:
             self.template = state["template"]
             self.route_is_saved = True
             # saved routes were learned on assignments; other types swap their own type into the URL
@@ -198,11 +249,9 @@ class DetailFetcher:
         if self.custom_template or (self.route_is_saved and template is None):
             return  # never overwrite a working route with a failure
         try:
-            self.state_file.parent.mkdir(exist_ok=True)
-            self.state_file.write_text(
-                json.dumps({"template": template, "failed_on": date.today().isoformat() if failed else None, "probe_version": PROBE_VERSION}),
-                encoding="utf-8",
-            )
+            atomic_bytes(self.state_file, json.dumps({"template": template,
+                         "failed_on": date.today().isoformat() if failed else None,
+                         "probe_version": PROBE_VERSION}).encode('utf-8'))
         except OSError:
             pass
 
@@ -214,35 +263,59 @@ class DetailFetcher:
 
     # -- fetching --
     def _get(self, template: str, ctx: dict) -> dict | None:
+        self._last_failure = 'invalid'
+        label = template if template in CANDIDATE_TEMPLATES else 'configured detail route'
         try:
-            url = template.format(**ctx)
-        except (KeyError, IndexError) as exc:
-            self.attempts.append(f"{template} -> bad placeholder {exc}")
+            url = template.format(**{k: quote(str(v), safe='') for k, v in ctx.items()})
+            parsed = urlsplit(url)
+            if (not url.startswith('/') or url.startswith('//') or '\\' in url
+                    or any(ord(c) < 32 for c in url) or parsed.scheme or parsed.netloc):
+                # Absolute overrides are allowed only for the approved HTTPS school origin.
+                school = str(getattr(getattr(self.session, 'creds', None), 'main_url', '')).lower()
+                if parsed.scheme != 'https' or parsed.netloc.lower() != school or '\\' in url or any(ord(c) < 32 for c in url):
+                    raise ValueError('Unapproved route')
+        except (KeyError, IndexError, ValueError, AttributeError):
+            self.attempts.append(f"{label} -> invalid route or placeholder")
             return None
         try:
-            payload = self.session.json(url)
+            timeout = self.budget.timeout()
+        except TimeoutError:
+            self._last_failure = 'deferred'
+            return None
+        try:
+            payload = self.session.json(url, timeout=timeout)
         except Exception as exc:  # noqa: BLE001 - expected while probing
+            self._last_failure = failure_kind(exc)
             resp = exc.args[1] if len(getattr(exc, "args", ())) > 1 else None
             status = getattr(resp, "status_code", None)
-            self.attempts.append(f"{url} -> {f'HTTP {status}' if status else type(exc).__name__}: {str(exc)[:100]}")
+            self.attempts.append(f"{label} -> {f'HTTP {status}' if isinstance(status, int) else type(exc).__name__}")
             return None
         if isinstance(payload, list) and len(payload) == 1:
             payload = payload[0]
         if not isinstance(payload, dict) or not payload:
-            self.attempts.append(f"{url} -> 200 but empty/unexpected payload")
+            self.attempts.append(f"{label} -> 200 but empty/unexpected payload")
             return None
-        dumped = json.dumps(payload, ensure_ascii=False)
-        title_l = (ctx.get("title") or "").strip().lower()
-        if ctx["id"] not in dumped and not (title_l and title_l in dumped.lower()):
-            self.attempts.append(f"{url} -> 200 but payload mentions neither this element's id nor its title")
+        # Exact root identity only: titles, nested records and substring hits cannot prove ownership.
+        identifiers = [payload[k] for k in ('id', 'identifier', 'plannedElementId', 'planned_element_id') if k in payload]
+        if not identifiers or any(not isinstance(value, (str, int)) or isinstance(value, bool)
+                                  or str(value) != str(ctx['id']) for value in identifiers):
+            self.attempts.append(f"{label} -> 200 but missing or mismatched element identity")
             return None
-        self.attempts.append(f"{url} -> OK")
-        return payload
+        text_fields = ('publicInfo', 'info', 'description', 'content', 'text', 'body', 'instruction')
+        if (not any(key in payload for key in (*text_fields, 'attachments', 'weblinks'))
+                or any(key in payload and not isinstance(payload[key], (str, type(None))) for key in text_fields)
+                or any(key in payload and not isinstance(payload[key], list) for key in ('attachments', 'weblinks'))):
+            self.attempts.append(f"{label} -> 200 but invalid detail schema")
+            return None
+        self.attempts.append(f"{label} -> OK")
+        return {key: value for key, value in payload.items()
+                if key in (*text_fields, 'attachments', 'weblinks', 'id', 'identifier', 'plannedElementId', 'planned_element_id')}
 
     def fetch(self, element_id: str, element_type: str, posted_date: date, title: str = "") -> dict | None:
         if element_id in self._cache:
             return self._cache[element_id]
         if self.disabled:
+            self.failures.setdefault(element_id, 'unavailable')
             return None
 
         ctx = {
@@ -256,13 +329,17 @@ class DetailFetcher:
 
         # stop asking a type after a few failures with no success
         if self._type_fail.get(element_type, 0) >= 3 and not self._type_ok.get(element_type):
+            self.failures[element_id] = self._type_failure.get(element_type, 'invalid')
             self._cache[element_id] = None
             return None
 
         payload = None
+        failures = []
         if self.template:
             payload = self._get(self.template, ctx)
-            if payload is None and self.route_is_saved and not self.custom_template and not self._probed_this_run:
+            if payload is None:
+                failures.append(self._last_failure)
+            if payload is None and self._last_failure not in ('transient', 'deferred', 'denied') and self.route_is_saved and not self.custom_template and not self._probed_this_run:
                 self.template = None
                 self.route_is_saved = False
         if payload is None and not self.template and not self.custom_template and element_type == "planned-assignments":
@@ -274,12 +351,19 @@ class DetailFetcher:
                     self.template = candidate
                     self._save_state(candidate, failed=False)
                     break
+                failures.append(self._last_failure)
+                if self._last_failure in ('deferred', 'denied', 'transient'):
+                    break
             if payload is None:
-                self.disabled = True
-                self._save_state(None, failed=True)
+                if all(reason in ('invalid', 'unavailable') for reason in failures):
+                    self.disabled = True
+                    self._save_state(None, failed=True)
                 self._write_probe_log()
 
         if payload is None:
+            self.failures[element_id] = ('denied' if 'denied' in failures else 'transient' if 'transient' in failures
+                                         else 'deferred' if 'deferred' in failures else 'invalid')
+            self._type_failure[element_type] = self.failures[element_id]
             self.fail_count += 1
             self._type_fail[element_type] = self._type_fail.get(element_type, 0) + 1
         else:

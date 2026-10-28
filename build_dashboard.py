@@ -1,4 +1,4 @@
-"""Builds a read-only dashboard.html from data/planner_data.json (open in a browser).
+"""Builds a snapshot dashboard with browser-local state from data/planner_data.json.
 Run: python build_dashboard.py"""
 
 from __future__ import annotations

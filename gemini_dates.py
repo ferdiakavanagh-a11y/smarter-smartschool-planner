@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+from windows_security import atomic_bytes
 
 # ---- Models, in order ----
 # Free-tier limits are per model: Flash-Lite 15 rpm / 500 rpd, full Flash 5 rpm / 20 rpd,
@@ -55,7 +58,7 @@ _HINT_RE = re.compile(
 
 
 def looks_worth_asking(text: str) -> bool:
-    return len(text.strip()) >= 12 and bool(_HINT_RE.search(text))
+    return bool(text.strip()) and bool(_HINT_RE.search(text))
 
 
 # ---- rate limiter ----
@@ -86,9 +89,19 @@ class UsageLimiter:
         if path:
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and loaded.get("version") == 2:
+                if isinstance(loaded, dict) and loaded.get("version") == 2 and isinstance(loaded.get('models'), dict):
+                    for state in loaded['models'].values():
+                        if not isinstance(state, dict) or not isinstance(state.get('blocked_today'), str) or type(state.get('requests_today')) is not int or state['requests_today'] < 0:
+                            raise ValueError('Invalid usage state')
+                        if not isinstance(state.get('cooldown_until'), (int, float)) or not math.isfinite(state['cooldown_until']):
+                            raise ValueError('Invalid usage cooldown')
+                        if not isinstance(state.get('recent'), list) or any(
+                            not isinstance(row, list) or len(row) != 2 or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in row)
+                            for row in state['recent']
+                        ):
+                            raise ValueError('Invalid usage history')
                     self.state.update(loaded)
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError, OverflowError):
                 pass
 
     @staticmethod
@@ -116,8 +129,7 @@ class UsageLimiter:
         if not self.path:
             return
         try:
-            self.path.parent.mkdir(exist_ok=True)
-            self.path.write_text(json.dumps(self.state), encoding="utf-8")
+            atomic_bytes(self.path, json.dumps(self.state).encode('utf-8'))
         except OSError:
             pass
 
@@ -284,7 +296,7 @@ def _generate(
                     problems.append(f"{model}: not found (404)")
                     break
                 if continue_on_error:
-                    problems.append(f"{model}: {type(exc).__name__} {str(exc)[:140]}")
+                    problems.append(f"{model}: {type(exc).__name__} (HTTP {code})" if code else f"{model}: {type(exc).__name__}")
                     break
                 raise  # 400/401/403: bad request or key, another model won't help
 
@@ -332,7 +344,7 @@ def _load_cache(path: Path | None) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return {}
 
 
@@ -340,8 +352,7 @@ def _save_cache(path: Path | None, cache: dict) -> None:
     if not path:
         return
     try:
-        path.parent.mkdir(exist_ok=True)
-        path.write_text(json.dumps(cache), encoding="utf-8")
+        atomic_bytes(path, json.dumps(cache).encode('utf-8'))
     except OSError:
         pass
 
@@ -423,9 +434,11 @@ def extract_due_dates_batch(
     try:
         client = _get_client(api_key)
     except ImportError:
+        last_problem = {'kind': 'other', 'detail': 'google-genai is not installed'}
         return results, "AI deadline detection is on, but the 'google-genai' package isn't installed (pip install google-genai)."
     except Exception as exc:  # noqa: BLE001
-        return results, f"AI deadline detection couldn't start: {exc}"
+        last_problem = {'kind': _classify_problem(exc), 'detail': type(exc).__name__}
+        return results, f"AI deadline detection couldn't start: {type(exc).__name__}"
 
     limiter = UsageLimiter(usage_file)
     keys = list(pending)
@@ -463,8 +476,9 @@ def extract_due_dates_batch(
             break
         except Exception as exc:  # noqa: BLE001
             code = _error_code(exc)
-            problem = f"AI request failed{f' (HTTP {code})' if code else ''}: {str(exc)[:300]}"
-            last_problem = {"kind": _classify_problem(exc), "detail": f"HTTP {code}: {str(exc)[:300]}" if code else str(exc)[:300]}
+            detail = f"HTTP {code}: {type(exc).__name__}" if code else type(exc).__name__
+            problem = f"AI request failed: {detail}"
+            last_problem = {"kind": _classify_problem(exc), "detail": detail}
             break
 
         parsed = _parse_response(getattr(response, "text", None))

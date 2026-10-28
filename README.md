@@ -123,8 +123,8 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
   `YYYY-MM-DD` format as you type them in.
 - **First-run setup window** - if `credentials.yml` is missing, the app asks
   for your details and creates it for you.
-- **First sync** - right after you save your details for the first
-  time, at the top right you have to click the sync button once so you don't start on an empty screen.
+- **First sync** - after saving your first login, choose a rendering mode when
+  prompted. The first sync starts after this choice. Use Sync now for later refreshes.
 
 ## Files
 | File | Purpose |
@@ -137,7 +137,7 @@ detail view. Cards link out to the specific task in Smartschool in your browser.
 | `gemini_dates.py` | Batched AI deadline detection, with caching, fallback and rate limiting |
 | `planner_html.py` | The shared UI (used by both the app and the plain dashboard) |
 | `task_state.py` | Remembers checked-off tasks, pins, notes and display settings |
-| `build_dashboard.py` | No-install fallback: plain `dashboard.html`, read-only |
+| `build_dashboard.py` | Browser fallback: saved snapshot with account-specific local checkboxes, pins and notes; no live sync |
 | `run_daily.bat` | Background sync only (no window), for Task Scheduler |
 | `build_exe.bat` | Builds `SmartschoolPlanner.exe` (see BUILD_EXE.md) |
 | `setup_and_build.bat` | One click: install dependencies, build the exe, then the installer |

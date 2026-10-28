@@ -24,6 +24,11 @@ when changing dependencies.
 
 ## Installer and updates
 
+Automatic installer execution and tag publication now require the approved signing
+certificate configured in `updater.py`. SignPath is pending, so the current empty
+trust list blocks these operations. Local unsigned candidates can still be built
+for isolated testing. See CODE_SIGNING_POLICY.md for the activation steps.
+
 Inno Setup packages the complete `dist\SmartschoolPlanner` bundle. GitHub's
 release workflow still publishes `SmartschoolPlanner-Setup.exe` and its checksum.
 Existing shortcuts, install location, app identity, credentials, and data paths
@@ -61,9 +66,9 @@ https://developer.microsoft.com/microsoft-edge/webview2/ and get the
 
 ## Automating it
 
-`run_daily.bat` (for Task Scheduler) still just runs `sync.py` +
-`build_dashboard.py` in the background - no window pops up, which is exactly
-what you want for an unattended scheduled task. The next time you open
+`run_daily.bat` (for Task Scheduler) runs `sync.py` to refresh the saved data.
+It needs Python and the source folder. Task Scheduler controls whether its
+console is visible; it does not regenerate `dashboard.html`. The next time you open
 `SmartschoolPlanner.exe` yourself, it'll show that freshly-synced data
 immediately. Use Sync now to fetch newer changes.
 

@@ -6,11 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
 import tempfile
 import threading
+import copy
+import time
 from functools import wraps
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -50,6 +53,12 @@ _run_lock = threading.Lock()
 class TimeoutSmartschool(SecureSmartschool):
     def __init__(self, creds):
         super().__init__(creds, ROOT)
+
+    def _make_traced_request(self, request_method, method, url, **kwargs):
+        budget = getattr(self, '_detail_budget', None)
+        if budget is not None:
+            kwargs['timeout'] = budget.timeout()
+        return super()._make_traced_request(request_method, method, url, **kwargs)
 
 
 def serial_sync(function):
@@ -169,7 +178,7 @@ def resolve_due_date_sync(explicit_deadline: str | None, free_text: str, referen
     if _regex_active:
         due_date, inferred = resolve_due_date(free_text, reference_date)
         if inferred:
-            return due_date.isoformat(), True, "regex", False
+            return due_date.isoformat(), due_date != reference_date, "regex", False
 
     return reference_date.isoformat(), False, "none", True
 
@@ -211,7 +220,9 @@ def assign_task_ids(todos, days, previous, account):
 
     def identity(task):
         server = server_id(task)
-        value = ['server', str(server)] if server else ['content', *semantic(task)]
+        value = (['server', str(server)] if server else
+                 ['moment', str(task['moment_id']), *semantic(task)] if task.get('moment_id') else
+                 ['content', *semantic(task)])
         return hashlib.sha256(json.dumps([account, value], ensure_ascii=False).encode('utf-8')).hexdigest()
 
     old, server_owners = {}, {}
@@ -220,12 +231,22 @@ def assign_task_ids(todos, days, previous, account):
             if not server_id(task):
                 old.setdefault(semantic(task), set()).add(task['id'])
             registry.setdefault(identity(task), task['id'])
-            if server_id(task):
+            if server_id(task) or task.get('moment_id'):
                 server_owners.setdefault(task['id'], set()).add(identity(task))
 
     identities = {}
     for task in todos:
         identities.setdefault(semantic(task), set()).add(identity(task))
+    for task in todos:
+        legacy_key = hashlib.sha256(json.dumps([account, ['content', *semantic(task)]], ensure_ascii=False).encode('utf-8')).hexdigest()
+        candidate = registry.get(legacy_key)
+        if candidate and len(identities[semantic(task)]) > 1:
+            server_owners.setdefault(candidate, set()).update(identities[semantic(task)])
+    # Registry entries created before moment-scoped identities may already share a state ID.
+    for task in todos:
+        key = identity(task)
+        if key in registry:
+            server_owners.setdefault(registry[key], set()).add(key)
     consumed = {registry[identity(task)] for task in todos if identity(task) in registry}
     claimed = {}
     for task in todos:
@@ -272,24 +293,6 @@ def assign_task_ids(todos, days, previous, account):
     return sorted(merged.values(), key=lambda task: task['due_date'])
 
 
-def _flatten_raw(obj, prefix: str = "") -> list[tuple[str, str]]:
-    """Flatten nested JSON into (path, value) pairs of non-empty string/number leaves."""
-    out: list[tuple[str, str]] = []
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            out.extend(_flatten_raw(v, f"{prefix}.{k}" if prefix else k))
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            out.extend(_flatten_raw(v, f"{prefix}[{i}]"))
-    elif isinstance(obj, str):
-        s = obj.strip()
-        if s:
-            out.append((prefix, s))
-    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
-        out.append((prefix, str(obj)))
-    return out
-
-
 # backend-plumbing field names: hidden from the detail view, still date-scanned
 _TECHNICAL_LEAF_NAMES = {
     "id", "platformid", "sort", "color", "resolvedstatus", "unconfirmed",
@@ -306,6 +309,12 @@ def _is_technical_field(path: str) -> bool:
 # Core fetches that failed during this sync (they are best-effort, but if ALL fail the sync must not look successful)
 _fetch_errors: dict[str, Exception] = {}
 _planner_diagnostics: dict[str, dict] = {}
+_optional_status: dict[str, str] = {}
+_optional_hidden: dict[str, set[str]] = {}
+
+
+class PlannerSchemaError(ValueError):
+    pass
 
 
 def skipped_record_summary(raw) -> dict:
@@ -358,9 +367,10 @@ def parse_planner_records(raw_elements, source: str):
             continue
         status['parsed'] += 1
         yield raw, element
-    if status['skipped'] and not status['parsed']:
+    if status['skipped']:
         status['status'] = 'failed'
-        raise ValueError('All planner records failed validation')
+        # An incomplete source cannot authoritatively remove previously known assignments.
+        raise PlannerSchemaError('Planner records failed validation; previous source retained')
 
 
 _ISO_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([.,]\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
@@ -393,12 +403,17 @@ def build_deadline_text(display_text: str, body_text: str, raw_fields, detail_ra
 
 
 def fetch_moment_info(
-    session: Smartschool, moment_id: str, lesson_date: date, course: str, pending: list[dict]
+    session: Smartschool, moment_id: str, lesson_date: date, course: str, pending: list[dict],
+    previous_info=None, detail_budget=None,
 ) -> dict | None:
     try:
+        if detail_budget is not None:
+            session._detail_budget = detail_budget
         info = SmartschoolMomentInfos(session, moment_id)
         # yields one element per xpath match; take the first
         for item in info:
+            if str(item.moment_id) != str(moment_id):
+                raise ValueError('Moment detail identity did not match')
             assignments = []
             for a in item.assignments:
                 free_text = " ".join(filter(None, [a.description, a.atdescription, a.assignment_info]))
@@ -437,12 +452,19 @@ def fetch_moment_info(
                 "assignments": assignments,
             }
     except Exception as exc:  # noqa: BLE001 - best effort
-        print(f"  (could not fetch moment info for {moment_id}: {exc})", file=sys.stderr)
+        print(f"  (could not fetch moment info: {type(exc).__name__})", file=sys.stderr)
+        if previous_info and planner_details.failure_kind(exc) == 'transient':
+            restored = copy.deepcopy(previous_info)
+            restored['detail_stale'] = True
+            return restored
+    finally:
+        if detail_budget is not None:
+            session._detail_budget = None
     return None
 
 
 def build_lessons_legacy(
-    session: Smartschool, start_date: date, cutoff: date, pending: list[dict]
+    session: Smartschool, start_date: date, cutoff: date, pending: list[dict], previous_events=None, detail_budget=None,
 ) -> list[dict]:
     """Legacy XML agenda (empty on Smartschool Next schools). Covers ~20 days per call, so call repeatedly and dedupe by moment_id."""
     hours = build_hours_lookup(session)
@@ -486,8 +508,11 @@ def build_lessons_legacy(
             }
 
             if has_flagged_info:
-                print(f"  fetching detail for {entry['course']} on {lesson_date} ...")
-                entry["info"] = fetch_moment_info(session, lesson.moment_id, lesson_date, entry["course"], pending)
+                print("  fetching lesson detail ...")
+                prior = (previous_events or {}).get(('legacy_agenda', str(lesson.moment_id)))
+                entry["info"] = fetch_moment_info(session, lesson.moment_id, lesson_date, entry["course"], pending,
+                                                  (prior or {}).get('info'), detail_budget)
+                entry['detail_stale'] = bool((entry['info'] or {}).get('detail_stale'))
 
             by_date.setdefault(lesson_date.isoformat(), []).append(entry)
 
@@ -502,6 +527,7 @@ def build_lessons_planner_api(
     cutoff: date,
     pending: list[dict],
     detail_fetcher: planner_details.DetailFetcher | None,
+    previous_events=None,
 ) -> dict[str, list[dict]]:
     """Planner cards (assignments, to-dos) from the Smartschool Next REST API.
     The list returns titles only; body text is fetched per item by detail_fetcher."""
@@ -541,8 +567,8 @@ def build_lessons_planner_api(
         display_text = " ".join([title, *extra_text_parts]).strip()
 
         # deadline scan text: body plus every other field
-        raw_fields = _flatten_raw(raw)
-        detail_raw_fields = _flatten_raw(detail_payload) if detail_payload else []
+        raw_fields = planner_details.flatten_json(raw)
+        detail_raw_fields = planner_details.flatten_json(detail_payload) if detail_payload else []
         scan_text = build_deadline_text(display_text, body_text, raw_fields, detail_raw_fields)
 
         # Smartschool's own deadline wins; else resolve now or queue for the AI pass
@@ -559,13 +585,14 @@ def build_lessons_planner_api(
         detail_fields = [[path, val] for path, val in raw_fields if not _is_technical_field(path)]
         detail_fields += [[f"detail.{path}", val] for path, val in detail_raw_fields if not _is_technical_field(path)]
 
+        links = planner_details.extract_links(detail_payload)
         assignment = {
             "id": None,  # set in run()
             "type": assignment_type,
             "description": display_text,
             "body": body_text,
-            "attachments": planner_details.extract_links(detail_payload)["attachments"] if detail_payload else [],
-            "weblinks": planner_details.extract_links(detail_payload)["weblinks"] if detail_payload else [],
+            "attachments": links["attachments"],
+            "weblinks": links["weblinks"],
             "info": None,
             "due_date": due_date,
             "due_date_corrected": due_corrected,
@@ -573,6 +600,18 @@ def build_lessons_planner_api(
             "warning": False,
             "detail_fields": detail_fields,
         }
+        failure = detail_fetcher.failures.get(str(pe.id)) if detail_fetcher is not None else None
+        prior = (previous_events or {}).get(('planner_api', str(pe.id)))
+        prior_assignments = ((prior or {}).get('info') or {}).get('assignments', [])
+        if failure in ('transient', 'deferred') and len(prior_assignments) == 1:
+            old = prior_assignments[0]
+            for field in ('body', 'attachments', 'weblinks'):
+                assignment[field] = copy.deepcopy(old.get(field, '' if field == 'body' else []))
+            assignment['detail_fields'] += [field for field in old.get('detail_fields', []) if str(field[0]).startswith('detail.')]
+            assignment['detail_stale'] = True
+            scan_text = build_deadline_text(display_text, assignment['body'], raw_fields, [])
+            if not pe.period.deadline:
+                assignment['due_date'], assignment['due_date_corrected'], assignment['due_date_source'], needs_ai = resolve_due_date_sync(None, scan_text, posted_date)
         if needs_ai:
             _register_for_ai(pending, scan_text, posted_date, [assignment])
 
@@ -627,6 +666,8 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
                 return {}  # A response containing only free days is a valid empty timetable.
             empty_response = True
         except Exception as exc:  # noqa: BLE001 - next guess
+            if isinstance(exc, PlannerSchemaError):
+                raise  # A narrower filter must not hide a partial broad response.
             last_exc = exc
             rejected_records = rejected_records or bool(_planner_diagnostics.get('timetable', {}).get('skipped'))
             continue
@@ -657,7 +698,7 @@ def build_all_classes_planner_api(session: Smartschool, start_date: date, cutoff
             "teacher": teacher,
             "groups": groups,
             "title": title,
-            "detail_fields": [[path, val] for path, val in _flatten_raw(raw) if not _is_technical_field(path)],
+            "detail_fields": [[path, val] for path, val in planner_details.flatten_json(raw) if not _is_technical_field(path)],
             "source": "planner_api",
             "element_type": str(pe.planned_element_type),
         }
@@ -673,15 +714,27 @@ def build_lessons(
     days_ahead: int,
     pending: list[dict],
     detail_fetcher: planner_details.DetailFetcher | None,
+    previous=None,
 ) -> list[dict]:
     today = date.today()
     start_date = today - timedelta(days=days_back)
     cutoff = today + timedelta(days=days_ahead)
 
     by_date: dict[str, list[dict]] = {}
+    previous_events = {}
+    duplicates = set()
+    for day in (previous or {}).get('days', []):
+        for event in day['events']:
+            key = (event.get('source'), str(event.get('moment_id')))
+            if key in previous_events:
+                duplicates.add(key)
+            previous_events[key] = event
+    for key in duplicates:
+        previous_events.pop(key)
 
     try:
-        legacy = build_lessons_legacy(session, start_date, cutoff, pending)
+        legacy = build_lessons_legacy(session, start_date, cutoff, pending, previous_events,
+                                      detail_fetcher.budget if detail_fetcher is not None else None)
         _planner_diagnostics['legacy'] = {'status': 'ok', 'parsed': sum(len(events) for events in legacy.values())}
         for d, events in legacy.items():
             by_date.setdefault(d, []).extend(events)
@@ -689,10 +742,11 @@ def build_lessons(
             print("  (legacy agenda endpoint returned nothing - your school is likely on the newer planner)")
     except Exception as exc:  # noqa: BLE001 - best effort
         _planner_diagnostics['legacy'] = {'status': 'failed', 'error': type(exc).__name__}
+        _fetch_errors['legacy'] = exc
         print(f"  (legacy agenda fetch failed: {type(exc).__name__}; continuing with the newer planner API)", file=sys.stderr)
 
     try:
-        planner = build_lessons_planner_api(session, start_date, cutoff, pending, detail_fetcher)
+        planner = build_lessons_planner_api(session, start_date, cutoff, pending, detail_fetcher, previous_events)
         for d, events in planner.items():
             by_date.setdefault(d, []).extend(events)
     except Exception as exc:  # noqa: BLE001 - best effort
@@ -799,8 +853,9 @@ def resolve_ai_pending(pending: list[dict], gemini_api_key: str | None) -> dict 
 
 def _num(text) -> float | None:
     try:
-        return float(str(text).strip().replace(",", "."))
-    except ValueError:
+        value = float(str(text).strip().replace(",", "."))
+        return value if math.isfinite(value) else None
+    except (ValueError, OverflowError):
         return None
 
 
@@ -815,10 +870,10 @@ def parse_result(r: dict) -> dict | None:
     if gtype == "percentage" and "/" in desc:
         left, _, right = desc.partition("/")
         score, maximum = _num(left), _num(right)
-        if score is not None and maximum:
-            percent = round(score / maximum * 100, 1)
+        if score is not None and maximum is not None and maximum > 0:
+            percent = _num(round(score / maximum * 100, 1))
     elif gtype == "percentage" and isinstance(value, (int, float)):
-        percent = float(value)
+        percent = _num(value)
     color = str(graphic.get("color") or "").strip().lower()
     if percent is None and gtype != "percentage":
         text = str(value if value not in (None, "") else desc).strip()
@@ -829,7 +884,8 @@ def parse_result(r: dict) -> dict | None:
     owner = r.get("gradebookOwner") if isinstance(r.get("gradebookOwner"), dict) else {}
     teacher = ((owner.get("name") or {}).get("startingWithFirstName") or "") if isinstance(owner.get("name"), dict) else ""
     period = (r.get("period") or {}).get("name", "") if isinstance(r.get("period"), dict) else ""
-    feedback = [str(f.get("text")).strip() for f in (r.get("feedback") or []) if isinstance(f, dict) and f.get("text")]
+    raw_feedback = r.get('feedback')
+    feedback = [str(f.get("text")).strip() for f in raw_feedback if isinstance(f, dict) and f.get("text")] if isinstance(raw_feedback, list) else []
     return {
         "id": str(r.get("identifier") or ""),
         "name": str(r.get("name") or "").strip(),
@@ -848,20 +904,39 @@ def parse_result(r: dict) -> dict | None:
     }
 
 
-def fetch_results(session: Smartschool, max_pages: int = 4) -> tuple[list[dict], str]:
+def fetch_results(session: Smartschool, max_pages: int = 100) -> tuple[list[dict], str]:
     """Grades, newest first. Never raises: returns ([], reason) if unavailable."""
     out: list[dict] = []
+    _optional_status['results'] = 'ok'
+    _optional_hidden['results'] = set()
+    deadline = time.monotonic() + 30
+    seen_pages = set()
     try:
         for page in range(1, max_pages + 1):
-            data = session.json(f"/results/api/v1/evaluations/?pageNumber={page}&itemsOnPage=50")
-            if not isinstance(data, list):
-                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Grade budget exhausted')
+            from urllib3.util import Timeout
+            data = session.json(f"/results/api/v1/evaluations/?pageNumber={page}&itemsOnPage=50",
+                                timeout=Timeout(total=min(10, remaining), connect=min(5, remaining), read=min(10, remaining)))
+            if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+                raise ValueError('Unexpected grades response format')
+            signature = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).digest()
+            if data and signature in seen_pages:
+                raise ValueError('Grade pagination did not advance')
+            seen_pages.add(signature)
+            _optional_hidden['results'].update(str(r['identifier']) for r in data
+                                                if r.get('identifier') and (r.get('deleted') or r.get('isPublished') is False))
             out.extend(p for p in (parse_result(r) for r in data) if p)
             if len(data) < 50:
                 break
+        else:
+            _optional_status['results'] = 'truncated'
+            return sorted(out, key=lambda x: x['date'], reverse=True), f'Grade history is incomplete: the {max_pages * 50:,}-record safety limit was reached. Averages use only loaded grades.'
     except Exception as exc:  # noqa: BLE001 - optional tab
-        print(f"  (could not fetch grades: {exc})", file=sys.stderr)
-        return out, f"Grades unavailable: {str(exc)[:120]}"
+        _optional_status['results'] = planner_details.failure_kind(exc)
+        print(f"  (could not fetch grades: {type(exc).__name__})", file=sys.stderr)
+        return out, 'Grades could not be fully loaded. Try syncing again.'
     out.sort(key=lambda x: x["date"], reverse=True)
     return out, ""
 
@@ -886,23 +961,30 @@ def fetch_lvs(session) -> dict:
     since = lvs_since()
     until = date(since.year + 1, 8, 31)
     output = {'notes': [], 'absences': [], 'notes_error': '', 'absences_error': '', 'since': since.isoformat()}
+    for key in ('notes', 'absences'):
+        _optional_status[key] = 'ok'
+        _optional_hidden[key] = set()
     if StudentNotes is None or StudentAbsences is None:
         output['notes_error'] = output['absences_error'] = 'LVS requires smartschool 0.12.0 or newer. Update the app dependencies and restart.'
+        _optional_status.update(notes='unavailable', absences='unavailable')
         return output
     try:
         for note in StudentNotes(session, since=since, until=until):
             if note.private:
+                _optional_hidden['notes'].add(str(note.item_id))
                 continue
             output['notes'].append({'id': str(note.item_id), 'title': note.title, 'category': note.cat_name,
                                     'date': note.date.isoformat() if note.date else '', 'author': note.author})
-    except Exception:  # optional school/account permissions and network failures
+    except Exception as exc:  # optional school/account permissions and network failures
+        _optional_status['notes'] = planner_details.failure_kind(exc)
         output['notes_error'] = 'Notes could not be loaded. Your school may not enable LVS access for this account. Try syncing again.'
     try:
         for absence in StudentAbsences(session, since=since, until=until):
             output['absences'].append({'id': str(absence.absent_id), 'date': absence.date.isoformat() if absence.date else '',
                                        'code': absence.code, 'description': absence.description,
                                        'part': str(absence.part_of_day or ''), 'info': absence.info})
-    except Exception:
+    except Exception as exc:
+        _optional_status['absences'] = planner_details.failure_kind(exc)
         output['absences_error'] = 'Absences could not be loaded. Access may be unavailable for this account. Try syncing again.'
     for key in ('notes', 'absences'):
         output[key].sort(key=lambda item: item['date'], reverse=True)
@@ -924,12 +1006,57 @@ def fetch_lvs_note_detail(session, item_id: str) -> dict:
             'attachments': [{'name': attachment.file_name} for attachment in detail.attachments]}
 
 
+def retain_optional_sections(results, results_note, lvs, previous, warnings):
+    """Reuse an approved-account section only after a known transient failure, within its school year."""
+    since = lvs_since().isoformat()
+    prior_status = previous.get('optional_section_status') or {}
+    metadata = {}
+    now = datetime.now().isoformat(timespec='seconds')
+    for key in ('results', 'notes', 'absences'):
+        status = _optional_status.get(key, 'ok')
+        fresh = results if key == 'results' else lvs[key]
+        prior = previous.get('results', []) if key == 'results' else previous.get('lvs', {}).get(key, [])
+        old_meta = prior_status.get(key, {})
+        old_year = old_meta.get('school_year_start') or (previous.get('lvs') or {}).get('since')
+        legacy_error = previous.get('results_note') if key == 'results' else (previous.get('lvs') or {}).get(key + '_error')
+        last_success = old_meta.get('last_success_at') if old_meta else previous.get('generated_at') if not legacy_error else None
+        stale = status == 'transient' and old_year == since and bool(last_success) and bool(prior)
+        if stale:
+            hidden = _optional_hidden.get(key, set())
+            merged = {str(item['id']): copy.deepcopy(item) for item in prior if item.get('id') and str(item['id']) not in hidden}
+            merged.update({str(item['id']): item for item in fresh if item.get('id')})
+            fresh = sorted(merged.values(), key=lambda item: item.get('date', ''), reverse=True)
+            message = f'Showing saved {key} from {last_success}; the refresh failed temporarily. This section may be out of date.'
+            if key == 'results':
+                results_note = message
+            else:
+                lvs[key + '_error'] = message
+            warnings.append({'source': key, 'kind': 'stale_data', 'title': f'Saved {key}', 'message': message, 'hint': 'Sync again when the school is reachable.', 'fix': False})
+        elif status in ('denied', 'invalid', 'unavailable'):
+            fresh = []  # Unknown failures never establish permission to retain sensitive history.
+        if status != 'ok' and not stale:
+            message = results_note if key == 'results' else lvs[key + '_error']
+            warnings.append({'source': key, 'kind': 'incomplete_data', 'title': f'{key.capitalize()} may be incomplete',
+                             'message': message or 'This section could not be fully refreshed.',
+                             'hint': 'Sync again to refresh this section. Grade averages include only loaded records.' if key == 'results' else 'Sync again to refresh this section.',
+                             'fix': False})
+        if key == 'results':
+            results = fresh
+        else:
+            lvs[key] = fresh
+        metadata[key] = {'status': 'stale' if stale else status, 'school_year_start': since,
+                         'last_success_at': now if status == 'ok' else last_success if stale else None}
+    return results, results_note, lvs, metadata
+
+
 @serial_sync
 def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     """Full sync; writes data/planner_data.json and returns the same data."""
     print("Logging in to Smartschool...")
     _fetch_errors.clear()
     _planner_diagnostics.clear()
+    _optional_status.clear()
+    _optional_hidden.clear()
     creds = credential_store.smartschool_credentials(ROOT / "credentials.yml")
     session = TimeoutSmartschool(creds)
     other_info = creds.other_info or {}
@@ -996,17 +1123,21 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     pending: list[dict] = []
 
     print(f"Fetching lessons from {days_back} day(s) ago to {days_ahead} day(s) ahead...")
-    lessons_by_day = build_lessons(session, days_back, days_ahead, pending, detail_fetcher)
+    lessons_by_day = build_lessons(session, days_back, days_ahead, pending, detail_fetcher, previous)
     failed_sources = set()
-    if 'planner' in _fetch_errors:
+    if 'planner' in _fetch_errors and (isinstance(_fetch_errors['planner'], PlannerSchemaError) or planner_details.failure_kind(_fetch_errors['planner']) == 'transient'):
         failed_sources.add('planner_api')
-    if _planner_diagnostics.get('legacy', {}).get('status') == 'failed':
+    if 'legacy' in _fetch_errors and planner_details.failure_kind(_fetch_errors['legacy']) == 'transient':
         failed_sources.add('legacy_agenda')
     if failed_sources:
         by_date = {day['date']: day['events'] for day in lessons_by_day}
         for day in previous.get('days', []):
             if start_date.isoformat() <= day['date'] <= cutoff.isoformat():
                 restored = [event for event in day['events'] if event.get('source') in failed_sources]
+                restored = copy.deepcopy(restored)
+                for event in restored:
+                    event['stale'] = True
+                    event.setdefault('last_success_at', previous.get('generated_at'))
                 if restored:
                     by_date.setdefault(day['date'], []).extend(restored)
         lessons_by_day = [{'date': day, 'events': sorted(events, key=lambda event: event['start'])} for day, events in sorted(by_date.items())]
@@ -1015,14 +1146,15 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     try:
         future_tasks, todos = build_future_tasks(session, pending)
     except Exception as exc:  # noqa: BLE001 - optional
-        print(f"  (could not fetch the separate future-tasks list: {exc})", file=sys.stderr)
+        print(f"  (could not fetch the separate future-tasks list: {type(exc).__name__})", file=sys.stderr)
         print("  Continuing without it - lesson-level to-dos below still work.", file=sys.stderr)
         _fetch_errors['future_tasks'] = exc
-        future_tasks = previous.get('future_tasks', [])
-        todos = [task for task in previous.get('todos', []) if task.get('source') == 'future_tasks']
+        can_restore = planner_details.failure_kind(exc) == 'transient'
+        future_tasks = previous.get('future_tasks', []) if can_restore else []
+        todos = [task for task in previous.get('todos', []) if can_restore and task.get('source') == 'future_tasks']
 
     if detail_fetcher.ok_count or detail_fetcher.fail_count:
-        print(f"  (assignment detail fetch: {detail_fetcher.ok_count} ok, {detail_fetcher.fail_count} failed, route: {detail_fetcher.template or 'none found'})")
+        print(f"  (assignment detail fetch: {detail_fetcher.ok_count} ok, {detail_fetcher.fail_count} failed)")
 
     print(f"Resolving due dates ({len(pending)} item(s) need a closer look)...")
     warnings: list[dict] = []
@@ -1051,6 +1183,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
                             "due_date_source": a.get("due_date_source", "none"),
                             "source": "lesson",
                             "detail_fields": a.get("detail_fields", []),
+                            "detail_stale": bool(a.get('detail_stale') or ev.get('detail_stale')),
                             "moment_id": ev.get("moment_id"),
                             "element_source": ev.get("source"),
                             "element_type": ev.get("element_type"),
@@ -1067,8 +1200,13 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         _planner_diagnostics.setdefault('timetable', {}).update(status='failed', error=type(exc).__name__)
         print(f"  (could not fetch the full timetable: {type(exc).__name__})", file=sys.stderr)
         _fetch_errors["timetable"] = exc
-        all_classes_by_date = {day['date']: day['events'] for day in previous.get('all_classes', [])
-                               if start_date.isoformat() <= day['date'] <= cutoff.isoformat()}
+        can_restore = isinstance(exc, PlannerSchemaError) or planner_details.failure_kind(exc) == 'transient'
+        all_classes_by_date = {day['date']: copy.deepcopy(day['events']) for day in previous.get('all_classes', [])
+                               if can_restore and start_date.isoformat() <= day['date'] <= cutoff.isoformat()}
+        for events in all_classes_by_date.values():
+            for event in events:
+                event['stale'] = True
+                event.setdefault('last_success_at', previous.get('generated_at'))
     all_classes = [
         {"date": d, "events": sorted(events, key=lambda e: e["start"])}
         for d, events in sorted(all_classes_by_date.items())
@@ -1115,6 +1253,17 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
     print("Fetching grades...")
     results, results_note = fetch_results(session)
     lvs = fetch_lvs(session)
+    results, results_note, lvs, optional_status = retain_optional_sections(results, results_note, lvs, previous, warnings)
+    stale_details = sum(bool(task.get('detail_stale')) for task in todos)
+    if stale_details:
+        warnings.append({'source': 'planner', 'kind': 'stale_details', 'title': 'Some instructions are saved copies',
+                         'message': f'{stale_details} assignments use previously saved instructions because detail requests failed or were deferred.',
+                         'hint': 'Sync again to refresh these instructions.', 'fix': False})
+    deferred_details = sum(reason == 'deferred' for reason in detail_fetcher.failures.values())
+    if deferred_details:
+        warnings.append({'source': 'planner', 'kind': 'detail_budget', 'title': 'Some instructions were deferred',
+                         'message': f'{deferred_details} instruction requests were deferred by the sync safety budget.',
+                         'hint': 'Sync again to refresh the remaining instructions.', 'fix': False})
     assignment_types = fetch_assignment_types(session)
 
     output = {
@@ -1129,6 +1278,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "all_classes": all_classes,
         "results": results,
         "results_note": results_note,
+        "optional_section_status": optional_status,
         "lvs": lvs,
         "assignment_types": assignment_types,
         "warnings": warnings,
@@ -1138,7 +1288,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
             "regex_parser_enabled": _regex_active,
             "gemini_configured": bool(gemini_api_key),
             "detail_fetch_status": detail_fetcher.status,
-            "detail_fetch_route": detail_fetcher.template,
+            "detail_fetch_route": detail_fetcher.template if detail_fetcher.template in planner_details.CANDIDATE_TEMPLATES else 'configured detail route' if detail_fetcher.template else None,
             "detail_fetch_attempts": detail_fetcher.attempts[-20:],
         },
     }

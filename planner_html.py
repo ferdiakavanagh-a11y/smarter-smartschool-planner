@@ -6,6 +6,7 @@ bridge, False works locally in a browser. The UI lives in TEMPLATE."""
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import sys
@@ -117,6 +118,7 @@ body:not(.searching) #top.scrolled #chips{transform:translateY(calc(var(--hdrH,0
 .chip:active{transform:scale(.94)}
 .chip::before{content:"";position:absolute;inset:-3px 0}
 .chip.active{background:color-mix(in srgb,var(--blue) 80%,#000);color:#fff;border-color:transparent}
+.chip[data-course]{max-width:min(260px,calc(100vw - 40px));overflow:hidden;text-overflow:ellipsis}
 
 .section{margin-bottom:26px}
 .section-header{font-size:1.375rem;font-weight:700;letter-spacing:-.02em;padding:6px 8px 10px;display:flex;align-items:baseline;justify-content:space-between}
@@ -262,8 +264,8 @@ body.searching #searchbar{display:block}
 #sheet.show{transform:translate(0,0)}
 .sheet-grabber{width:40px;height:5px;border-radius:3px;background:var(--text-tertiary);margin:9px auto 6px;flex-shrink:0}
 .sheet-head{padding:4px 20px 12px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;position:relative;z-index:1}
-.sheet-head h2{font-size:1.375rem;font-weight:700;letter-spacing:-.02em}
-.sheet-close{width:32px;height:32px;border-radius:50%;background:var(--fill);display:grid;place-items:center;transition:transform 120ms}
+.sheet-head h2{font-size:1.375rem;font-weight:700;letter-spacing:-.02em;min-width:0;overflow-wrap:anywhere}
+.sheet-close{width:32px;height:32px;flex-shrink:0;border-radius:50%;background:var(--fill);display:grid;place-items:center;transition:transform 120ms}
 .sheet-close:active{transform:scale(.85)}
 .sheet-scroll{overflow-y:auto;padding:0 20px 20px;position:relative;z-index:1}
 .sheet-scroll::-webkit-scrollbar{width:6px}
@@ -277,6 +279,8 @@ body.searching #searchbar{display:block}
 .detail-row+.detail-row::before{content:"";position:absolute;left:14px;right:0;top:0;height:.5px;background:var(--separator)}
 .detail-row .k{color:var(--text-secondary)}
 .detail-row .v{text-align:right;font-weight:500;max-width:60%}
+.task-body,.lesson-body,.grade-row>div,.detail-desc,.detail-info,.detail-row,.section-header{min-width:0;overflow-wrap:anywhere}
+.grade-row>div+div{flex-shrink:0}
 .detail-badges{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}
 .btn-primary{width:100%;padding:14px;border-radius:16px;background:var(--blue);color:#fff;font-size:1.0625rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;transition:transform 120ms}
 .btn-primary:active{transform:scale(.97)}
@@ -554,7 +558,7 @@ body.focusing.reduce-motion .focus-action>.bubble{transition:none}
 </div>
 
 <div id="sheet-backdrop"></div>
-<div id="sheet" class="glass" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
+<div id="sheet" class="glass" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1" inert>
   <div class="sheet-grabber"></div>
   <div class="sheet-head">
     <h2 id="sheetTitle">Detail</h2>
@@ -575,23 +579,36 @@ var COMPLETED = __COMPLETED_JSON__;
 var SETTINGS = __SETTINGS_JSON__;
 var PINNED = __PINNED_JSON__;
 var NOTES = __NOTES_JSON__;
+var STORAGE_PREFIX = __STORAGE_PREFIX_JSON__;
+function storageKey(key){
+  if(!STORAGE_PREFIX)throw new Error('Sync this account before saving browser state.');
+  return STORAGE_PREFIX+key.replace(/^planner\./,'');
+}
 var PLATFORM_ID = DATA.platform_id, USER_ID = DATA.user_id;
 DATA.todos = DATA.todos || []; DATA.days = DATA.days || []; DATA.all_classes = DATA.all_classes || [];
 function bridge(){ return (EMBEDDED && window.pywebview && window.pywebview.api) ? window.pywebview.api : null; }
-function syncNow(){ var api = bridge(); if (!api || (BOOT && BOOT.chooseRendering)) return; showLoading(); api.sync_now(); }
+async function syncNow(){
+  var api=bridge();if(!api || (BOOT && BOOT.chooseRendering))return;
+  if(!await flushNote())return;await stateWriteQueue;
+  showLoading();try{await api.sync_now();}catch(e){hideState();showToast('Sync could not start. Please try again.');}
+}
 var stateWriteQueue=Promise.resolve();
 function queueStateWrite(work){var result=stateWriteQueue.then(work);stateWriteQueue=result.catch(function(){});return result;}
 async function persistState(method,args,storage,value){
   var api=bridge();
   if(EMBEDDED){if(!api || !await api[method].apply(api,args))throw new Error('save failed');}
-  else localStorage.setItem(storage,JSON.stringify(value));
+  else localStorage.setItem(storageKey(storage),JSON.stringify(value));
 }
 function markTask(id,done){return queueStateWrite(async function(){
   var next=COMPLETED.filter(function(value){return value!==id;});if(done)next.push(id);
   try{await persistState('mark_task',[id,!!done],'planner.completed',next);COMPLETED=next;render(DATA,COMPLETED,{keepScroll:true});return true;}
   catch(e){render(DATA,COMPLETED,{keepScroll:true});showToast('Completion could not be saved. Please try again.');return false;}
 });}
-function openExternal(url){ var api = bridge(); if (api) api.open_external(url); else window.open(url, "_blank"); }
+function openExternal(url){
+  try {var parsed=new URL(url);if(!/^https?:$/.test(parsed.protocol)||parsed.username||parsed.password)throw new Error('url');}
+  catch(e){showToast('This link is not a supported web address.');return;}
+  var api=bridge();if(api)api.open_external(parsed.href);else window.open(parsed.href,'_blank','noopener,noreferrer');
+}
 function saveSetting(key,val){
   return queueStateWrite(async function(){
     var next=Object.assign({},SETTINGS);next[key]=val;
@@ -611,10 +628,11 @@ function saveNote(id,text){return queueStateWrite(async function(){
   catch(e){showToast('Note was not saved. Your text is still here; copy it or try again.');return false;}
 });}
 if (!EMBEDDED) {
-  try { var _p = JSON.parse(localStorage.getItem("planner.pinned") || "[]"); if (Array.isArray(_p)) PINNED = _p; } catch(e){}
-  try { var _n = JSON.parse(localStorage.getItem("planner.notes") || "{}"); if (_n && typeof _n === "object") NOTES = _n; } catch(e){}
+  try { var _c = JSON.parse(localStorage.getItem(storageKey("planner.completed")) || "[]"); if (Array.isArray(_c)) COMPLETED = _c; } catch(e){}
+  try { var _p = JSON.parse(localStorage.getItem(storageKey("planner.pinned")) || "[]"); if (Array.isArray(_p)) PINNED = _p; } catch(e){}
+  try { var _n = JSON.parse(localStorage.getItem(storageKey("planner.notes")) || "{}"); if (_n && typeof _n === "object" && !Array.isArray(_n)) NOTES = _n; } catch(e){}
 }
-if (!EMBEDDED) { try { var _s = JSON.parse(localStorage.getItem("planner.settings") || "{}"); for (var _k in _s) if (!(_k in SETTINGS)) SETTINGS[_k] = _s[_k]; } catch(e){} }
+if (!EMBEDDED) { try { var _s = JSON.parse(localStorage.getItem(storageKey("planner.settings")) || "{}"); for (var _k in _s) if (!(_k in SETTINGS)) SETTINGS[_k] = _s[_k]; } catch(e){} }
 document.documentElement.setAttribute('data-rendering', renderingMode());
 
 /* ===== STATE ===== */
@@ -633,7 +651,7 @@ var PALETTE = ["--blue","--purple","--orange","--green","--teal","--pink","--yel
 var COURSE_VAR = { frans:"--purple", geschiedenis:"--orange", nederlands:"--green", english:"--teal", engels:"--teal" };
 function courseVar(c){
   c = (c||"").toLowerCase();
-  if (COURSE_VAR[c]) return COURSE_VAR[c];
+  if (Object.prototype.hasOwnProperty.call(COURSE_VAR,c)) return COURSE_VAR[c];
   var h = 0; for (var i=0;i<c.length;i++) h = (h*31 + c.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
@@ -721,7 +739,7 @@ function render(data, completed, opts){
 function renderChips(data){
   var el = document.getElementById("chips");
   if (activeTab !== "todo" && activeTab !== "missed") { if (el.__chipsHTML !== "") el.innerHTML = ""; el.__chipsHTML = ""; return; }
-  var seen = {}, courses = ["All"];
+  var seen = Object.create(null), courses = ["All"];
   data.todos.forEach(function(t){ if (!seen[t.course]) { seen[t.course]=1; courses.push(t.course); } });
   var types = new Set();
   (data.assignment_types||[]).forEach(function(t){if(t.visible && t.name) types.add(t.name);});
@@ -731,7 +749,7 @@ function renderChips(data){
   var typeList=Array.from(types).sort(function(a,b){return a.localeCompare(b);});
   el.__taskTypes=typeList;
   var html = '<button class="chip type-filter" aria-label="Task type: '+esc(activeType||'All types')+'" aria-haspopup="listbox" aria-expanded="false" aria-controls="taskTypeMenu" id="taskTypeFilter"><span>'+esc(activeType||'All types')+'</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>';
-  if (activeTab === 'todo') html += courses.map(function(c){ return '<button class="chip'+(c===activeCourse?" active":"")+'" aria-pressed="'+(c===activeCourse?"true":"false")+'" data-course="'+esc(c)+'">'+esc(c)+'</button>'; }).join("");
+  if (activeTab === 'todo') html += courses.map(function(c){ return '<button class="chip'+(c===activeCourse?" active":"")+'" title="'+esc(c)+'" aria-pressed="'+(c===activeCourse?"true":"false")+'" data-course="'+esc(c)+'">'+esc(c)+'</button>'; }).join("");
   if (el.__chipsHTML !== html) { el.innerHTML = html; el.__chipsHTML = html; }
 }
 
@@ -847,7 +865,7 @@ function weekStats(data, completed){
   data.todos.forEach(function(t){
     if (completed.indexOf(t.id) !== -1) return;
     var k = daysBetween(TODAY, t.due_date);
-    if (k < 0 || k > 6) return;
+    if (!Number.isFinite(k) || k < 0 || k > 6) return;
     var isTest = TEST_RE.test(t.type || "");
     days[k].n++; days[k].score += isTest ? 3 : 1; if (isTest) days[k].tests++;
     total++; if (isTest) tests++;
@@ -959,7 +977,7 @@ function gradeColor(p){ return p == null ? "var(--text)" : p < 50 ? "var(--red)"
 var GRADE_COLORS = { green:"#34c759", red:"#ff3b30", olive:"#8a9a2b", yellow:"#ffcc00", steel:"#7d93a8", grass:"#5fbf3f", orange:"#ff9500", blue:"#0a84ff", purple:"#af52de", pink:"#ff2d55", teal:"#30b0c7", grey:"#8e8e93", gray:"#8e8e93" };
 function gradeCssColor(c){
   c = String(c || "").toLowerCase();
-  if (GRADE_COLORS[c]) return GRADE_COLORS[c];
+  if (Object.prototype.hasOwnProperty.call(GRADE_COLORS,c)) return GRADE_COLORS[c];
   return /^#[0-9a-f]{3,8}$/.test(c) || /^[a-z]{3,20}$/.test(c) ? c : "";   // hex or CSS colour name only
 }
 function hasScore(r){ return (r.score != null && r.max) || r.percent != null; }
@@ -981,10 +999,11 @@ function renderGrades(data){
     if (searchActive() && all.length) return noMatches();
     return empty("No grades", esc(data.results_note || "No published grades were found yet. They show up here after a sync."), ICON.grade);
   }
-  var by = {};
+  var by = Object.create(null);
   list.forEach(function(r){ (by[r.course] = by[r.course] || []).push(r); });
   var overall = averageOf(list);
-  var html = overall == null ? "" : '<div class="section"><div class="group grade-summary"><span style="color:var(--text-secondary);font-size:14px;font-weight:600">Overall average</span><b style="color:'+gradeColor(overall)+'">'+Math.round(overall)+'%</b></div></div>';
+  var html = data.results_note ? '<p class="detail-info" role="status">'+esc(data.results_note)+'</p>' : '';
+  html += overall == null ? "" : '<div class="section"><div class="group grade-summary"><span style="color:var(--text-secondary);font-size:14px;font-weight:600">Overall average</span><b style="color:'+gradeColor(overall)+'">'+Math.round(overall)+'%</b></div></div>';
   Object.keys(by).sort().forEach(function(c){
     html += '<div class="section"><div class="section-header" role="heading" aria-level="2"><span>'+esc(c)+avgPill(averageOf(by[c]))+'</span><span class="count">'+by[c].length+'</span></div><div class="group">'+
       by[c].map(function(r){
@@ -1011,16 +1030,15 @@ function lvsReadKey(){return 'lvsRead:'+JSON.stringify([DATA.main_url||'',DATA.u
 function lvsItemKey(kind,id){return kind+':'+String(id);}
 function lvsUnread(kind,id){var read=SETTINGS[lvsReadKey()];return !Array.isArray(read) || read.indexOf(lvsItemKey(kind,id))===-1;}
 function unreadDot(){return '<span class="unread-dot" role="img" aria-label="Unread"></span>';}
-var lvsReadQueue=Promise.resolve();
 function saveLvsRead(items){
   var key=lvsReadKey();
   // Serialize single-item and bulk saves so a slower request cannot undo a newer read.
-  lvsReadQueue=lvsReadQueue.then(async function(){
+  return queueStateWrite(async function(){
     var previous=SETTINGS[key], next=Array.from(new Set((Array.isArray(previous)?previous:[]).concat(items)));
     try {
       var api=bridge();
       if (EMBEDDED) {if (!api || !await api.save_setting(key,next)) throw new Error('save');}
-      else localStorage.setItem('planner.settings',JSON.stringify(Object.assign({},SETTINGS,{[key]:next})));
+      else localStorage.setItem(storageKey('planner.settings'),JSON.stringify(Object.assign({},SETTINGS,{[key]:next})));
       SETTINGS[key]=next;
     } catch(e) {
       showToast('Could not save read status. Please try again.');
@@ -1034,7 +1052,6 @@ function saveLvsRead(items){
     var button=document.querySelector('[data-lvs-read-all]');
     if(button)button.disabled=!hasUnreadLvs();
   });
-  return lvsReadQueue;
 }
 function markLvsRead(kind,id){
   if (!lvsUnread(kind,id)) return Promise.resolve();
@@ -1124,24 +1141,24 @@ function extraBlock(fields){
 }
 function linkButton(link){ return link ? '<button class="btn-primary" data-external="1">'+ICON.ext+' Open in Smartschool</button>' : ""; }
 
-function fmtSize(n){ if (n == null) return ""; return n >= 1048576 ? (n/1048576).toFixed(1)+" MB" : n >= 1024 ? Math.round(n/1024)+" KB" : n+" B"; }
+function fmtSize(n){ if (!Number.isFinite(n) || n < 0) return ""; return n >= 1048576 ? (n/1048576).toFixed(1)+" MB" : n >= 1024 ? Math.round(n/1024)+" KB" : n+" B"; }
 function linksBlock(t){
   var a = t.attachments || [], w = t.weblinks || [];
   if (!a.length && !w.length) return "";
   var h = '<div class="detail-block"><h4>Attachments &amp; links</h4><div>';
   a.forEach(function(x){
     var label = esc(x.name) + (x.size != null ? ' <span style="color:var(--text-secondary)">('+fmtSize(x.size)+')</span>' : "");
-    h += x.url ? '<span class="chip-link" data-open-url="'+esc(x.url)+'">'+ICON.clip.replace(' class="mini"',"")+label+'</span>'
+    h += x.url ? '<button class="chip-link" data-open-url="'+esc(x.url)+'">'+ICON.clip.replace(' class="mini"',"")+label+'</button>'
                : '<span class="chip-link static">'+ICON.clip.replace(' class="mini"',"")+label+'</span>';
   });
   w.forEach(function(x){
     var label = esc(x.name || x.url);
-    h += x.url ? '<span class="chip-link" data-open-url="'+esc(x.url)+'">'+ICON.link+label+'</span>' : '<span class="chip-link static">'+ICON.link+label+'</span>';
+    h += x.url ? '<button class="chip-link" data-open-url="'+esc(x.url)+'">'+ICON.link+label+'</button>' : '<span class="chip-link static">'+ICON.link+label+'</span>';
   });
   return h + '</div>' + (a.some(function(x){ return !x.url; }) ? '<div style="font-size:12px;color:var(--text-secondary)">Open the task in Smartschool to download attachments.</div>' : "") + '</div>';
 }
 function noteBlock(id){
-  return '<div class="detail-block"><h4>My notes</h4><textarea class="note-area" id="noteArea" data-note="'+esc(id)+'" placeholder="Private notes - saved on this computer only">'+esc(NOTES[id] || "")+'</textarea></div>';
+  return '<div class="detail-block"><h4><label for="noteArea">My notes</label></h4><textarea class="note-area" id="noteArea" maxlength="5000" data-note="'+esc(id)+'" placeholder="Private notes - saved on this computer only">'+esc(NOTES[id] || "")+'</textarea></div>';
 }
 function pinButton(id){
   var on = PINNED.indexOf(id) !== -1;
@@ -1157,6 +1174,29 @@ async function flushNote(){
     render(DATA, COMPLETED, { keepScroll: true });
   }
   return true;
+}
+var closePreparing = null, closeFocus = null;
+function cancelNativeClose(){
+  document.body.removeAttribute('inert');closePreparing=null;
+  if(closeFocus && closeFocus.isConnected && closeFocus.focus)closeFocus.focus({preventScroll:true});
+  closeFocus=null;
+}
+function prepareForClose(){
+  if(closePreparing)return closePreparing;
+  closeFocus=document.activeElement;
+  document.body.setAttribute('inert','');
+  closePreparing=(async function(){
+    if(!await flushNote()){cancelNativeClose();return false;}
+    await stateWriteQueue;
+    return true;
+  })().catch(function(){cancelNativeClose();return false;});
+  return closePreparing;
+}
+async function requestNativeClose(){
+  var api=bridge();if(!api)return;
+  try{if(await prepareForClose()){await api.win_close();return;}}
+  catch(e){showToast('The window could not close. Please try again.');}
+  cancelNativeClose();if(api.cancel_close)await api.cancel_close();
 }
 
 function openTask(id, focus){
@@ -1268,7 +1308,7 @@ function openLesson(mid){
     ev.info.assignments.forEach(function(a){ fields = fields.concat(a.detail_fields || []); });
     ev.info.assignments.forEach(function(a){ if (infoText(a)) assign += '<div class="detail-block"><h4>Info voor de leerling</h4><div class="detail-info">'+esc(infoText(a))+'</div></div>'; });
     assign += '<div class="detail-block"><h4>Assignments</h4><div class="detail-list">'+ev.info.assignments.map(function(a){
-      return '<div class="detail-row" style="cursor:pointer" data-detail="task" data-id="'+esc(a.id)+'"><span class="k">'+esc(a.type||"Task")+'</span><span class="v">'+esc(a.description)+' - '+relLabel(a.due_date)+'</span></div>'; }).join("")+'</div></div>';
+      return '<button class="detail-row" style="width:100%" data-detail="task" data-id="'+esc(a.id)+'"><span class="k">'+esc(a.type||"Task")+'</span><span class="v">'+esc(a.description)+' - '+relLabel(a.due_date)+'</span></button>'; }).join("")+'</div></div>';
   }
   var pairs = [["Course",ev.course],["Time",ev.start+" - "+ev.end],["Classroom",ev.classroom],["Teacher",ev.teacher],["Group",ev.groups],["Date",fmtLong(day.date)]];
   if (ev.info && ev.info.materials) pairs.push(["Materials",ev.info.materials]);
@@ -1306,6 +1346,7 @@ function showSheet(title, body, link, reuse){
   // Install the final-size filter before the entrance, not during its first frames.
   if (rebuilt && LENS.ok) lensApplyBatch([sheetEl]);
   sheetEl.classList.add("show"); document.body.classList.add("sheet-open"); scrimEl.classList.add("show");
+  sheetEl.removeAttribute('inert');
   setInert(true); sheetEl.focus({preventScroll:true});
   return rebuilt;
 }
@@ -1318,6 +1359,7 @@ async function hideSheet(){
   sheetEl.style.transition = ""; scrimEl.style.transition = "";
   sheetEl.style.transform = ""; scrimEl.style.opacity = "";
   document.body.classList.remove("sheet-open"); sheetEl.classList.remove("show"); scrimEl.classList.remove("show");
+  sheetEl.setAttribute('inert','');
   setInert(false); restoreFocus();
 }
 async function finishClose(){
@@ -1325,6 +1367,7 @@ async function finishClose(){
   if(!await flushNote()){sheetResetStyles();return;} cancelAnimationFrame(sheetAnim);
   sheetEl.style.transition = "none"; scrimEl.style.transition = "none";
   document.body.classList.remove("sheet-open"); sheetEl.classList.remove("show"); scrimEl.classList.remove("show");
+  sheetEl.setAttribute('inert','');
   sheetEl.style.transform = ""; scrimEl.style.opacity = "";
   void sheetEl.offsetHeight;
   sheetEl.style.transition = ""; scrimEl.style.transition = "";
@@ -1506,9 +1549,7 @@ function setRenderingMode(mode){
     if (status) status.textContent = 'Could not save your choice. Please try again.';
   };
   try {
-    var api = bridge(), saved;
-    if (EMBEDDED) { if (!api) { failed(); return; } saved = api.save_setting('renderingMode', mode); }
-    else { var next = Object.assign({}, SETTINGS, {renderingMode:mode}); localStorage.setItem('planner.settings', JSON.stringify(next)); saved = true; }
+    var saved = saveSetting('renderingMode',mode);
     Promise.resolve(saved).then(function(ok){
       if (!ok) { failed(); return; }
       SETTINGS.renderingMode = mode;
@@ -1557,7 +1598,7 @@ async function setDateChecker(mode){
   var status = document.getElementById('dateCheckerStatus'), api = bridge(); if (!status || !api) return;
   document.querySelectorAll('[data-date-checker]').forEach(function(button){button.disabled=true;});
   try {
-    var saved = await api.save_setting('dateChecker',mode);
+    var saved = await saveSetting('dateChecker',mode);
     await refreshDateChecker();
     if (!saved && status.isConnected) status.textContent = 'Could not save this choice. Check your Gemini key or try again.';
   } catch(e) {
@@ -1609,7 +1650,7 @@ function openSettings(){
     '<div class="setting-group"><h4>Mode</h4><div class="detail-list"><div class="seg-control">'+
       ["auto","light","dark"].map(function(m){ return '<button class="seg'+((loadSetting("scheme")||"auto")===m?" active":"")+'" data-scheme-opt="'+m+'">'+m.charAt(0).toUpperCase()+m.slice(1)+'</button>'; }).join("")+'</div></div></div>'+
     '<div class="setting-group"><h4>Liquid glass</h4><div class="detail-list"><div style="padding:14px 16px">'+
-      '<input type="range" min="0" max="2" step="1" value="'+currentLevel()+'" class="glass-slider" id="glassSlider" aria-label="Liquid glass strength">'+
+      '<input type="range" min="0" max="2" step="1" value="'+esc(currentLevel())+'" class="glass-slider" id="glassSlider" aria-label="Liquid glass strength">'+
       '<div class="glass-level-labels"><span>Subtle</span><span>Balanced</span><span>Strong</span></div></div></div></div>'+
     '<div class="setting-group"><h4>Text size</h4><div class="detail-list"><div class="seg-control">'+
       [["s","Small"],["m","Default"],["l","Large"]].map(function(o){ return '<button class="seg'+((loadSetting("textSize")||"m")===o[0]?" active":"")+'" data-text-opt="'+o[0]+'">'+o[1]+'</button>'; }).join("")+'</div></div></div>'+
@@ -1706,7 +1747,7 @@ function showError(info){
   ov.classList.add("show");
   var f1 = document.getElementById("fixBtn") || document.getElementById("retryBtn"); if (f1) f1.focus({preventScroll:true});
 }
-var WARN_DISMISSED = {};
+var WARN_DISMISSED = Object.create(null);
 function renderWarnings(data){
   var bar = document.getElementById("warnBar"); if (!bar) return;
   var list = ((data && data.warnings) || []).filter(function(w){ return !WARN_DISMISSED[w.kind]; });
@@ -1838,6 +1879,16 @@ document.addEventListener("keydown", function(e){
 document.getElementById("sheetClose").addEventListener("click", hideSheet);
 document.getElementById("sheet-backdrop").addEventListener("click", hideSheet);
 document.addEventListener("keydown", function(e){ if (e.key==="Escape") hideSheet(); });
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Tab')return;
+  var overlay=document.getElementById('state-overlay');
+  var modal=overlay.classList.contains('show')?overlay:sheetEl.classList.contains('show')?sheetEl:null;
+  if(!modal)return;
+  var items=Array.from(modal.querySelectorAll('button,input,textarea,select,summary,a[href],[tabindex]')).filter(function(el){return !el.disabled && el.tabIndex>=0 && el.getClientRects().length;});
+  if(!items.length){e.preventDefault();return;}
+  var index=items.indexOf(document.activeElement);
+  if(index<0 || (e.shiftKey?index===0:index===items.length-1)){e.preventDefault();items[e.shiftKey?items.length-1:0].focus();}
+});
 
 function openSmartschool(){ var url = sheetLink || (DATA.main_url ? "https://" + DATA.main_url + "/planner" : null); if (url) openExternal(url); }
 document.getElementById("scroll").addEventListener("click", async function(e){
@@ -1921,7 +1972,7 @@ window.addEventListener("focus", function(){ document.body.classList.remove("ina
 
 /* ===== WINDOW CONTROLS ===== */
 function winCall(name){ var api = bridge(); return (api && api[name]) ? api[name].apply(api, [].slice.call(arguments, 1)) : null; }
-document.getElementById("wcClose").addEventListener("click", function(){ winCall("win_close"); });
+document.getElementById("wcClose").addEventListener("click", requestNativeClose);
 document.getElementById("wcMin").addEventListener("click", function(){ winCall("win_minimize"); });
 document.getElementById("wcMax").addEventListener("click", function(){ winCall("win_toggle_maximize"); });
 document.getElementById("titlebar").addEventListener("dblclick", function(){ winCall("win_toggle_maximize"); });
@@ -2130,7 +2181,7 @@ def _json(obj) -> str:
     # safe inside <script>
     return (
         json.dumps(obj, ensure_ascii=False)
-        .replace("</", "<\\/")
+        .replace("<", "\\u003c")
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
@@ -2139,11 +2190,14 @@ def _json(obj) -> str:
 _EMPTY_DATA = {"todos": [], "days": [], "all_classes": [], "main_url": "", "generated_at": None}
 _PLACEHOLDER_RE = re.compile(
     r"__WC_VARS__|__EMBEDDED_JSON__|__BOOT_JSON__|__DATA_JSON__|"
-    r"__COMPLETED_JSON__|__SETTINGS_JSON__|__PINNED_JSON__|__NOTES_JSON__"
+    r"__COMPLETED_JSON__|__SETTINGS_JSON__|__PINNED_JSON__|__NOTES_JSON__|__STORAGE_PREFIX_JSON__"
 )
 
 
 def _build(data, completed_ids, embedded, settings, boot, pinned=None, notes=None) -> str:
+    account = data.get('account_key')
+    # Old unscoped browser state has no ownership evidence and is never imported.
+    storage_prefix = 'planner.' + hashlib.sha256(account.encode()).hexdigest() + '.' if isinstance(account, str) and account else None
     values = {
         "__WC_VARS__": _window_button_css(),
         "__EMBEDDED_JSON__": "true" if embedded else "false",
@@ -2153,6 +2207,7 @@ def _build(data, completed_ids, embedded, settings, boot, pinned=None, notes=Non
         "__SETTINGS_JSON__": _json(settings or {}),
         "__PINNED_JSON__": _json(list(pinned or [])),
         "__NOTES_JSON__": _json(notes or {}),
+        "__STORAGE_PREFIX_JSON__": _json(storage_prefix),
     }
     return _PLACEHOLDER_RE.sub(lambda match: values[match.group(0)], TEMPLATE)
 

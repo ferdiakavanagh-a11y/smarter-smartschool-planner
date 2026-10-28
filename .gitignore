@@ -1,5 +1,7 @@
 # never commit or share these
 credentials.yml
+credentials.recovery.bin
+error.log
 data/
 dashboard.html
 context.md
@@ -9,6 +11,8 @@ dist/
 *.spec
 SmartschoolPlanner.exe
 installer_output/
+_internal/
 __pycache__/
 tests/
 release_tests/
+tasks/

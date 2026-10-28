@@ -79,14 +79,54 @@ class Api:
         self._closed = threading.Event()
         self._update_lock = threading.Lock()
         self._settings_lock = threading.Lock()
+        self._setup_lock = threading.Lock()
         self._focus_lock = threading.Lock()
         self._focus = None
         self._focus_bounds = None
+        self._close_lock = threading.Lock()
+        self._close_pending = False
+        self._close_ready = False
 
     # window controls
     def win_close(self):
-        self._window.destroy()
+        self._close_ready = True
+        try:
+            self._window.destroy()
+        except Exception:
+            self._close_ready = False
+            raise
         return True
+
+    def cancel_close(self):
+        with self._close_lock:
+            self._close_pending = False
+        return True
+
+    def _on_closing(self):
+        if self._close_ready:
+            return True
+        # The native closing event runs on the UI thread; never wait for JS here.
+        with self._close_lock:
+            if not self._close_pending:
+                self._close_pending = True
+                threading.Thread(target=self._request_close, daemon=True).start()
+        return False
+
+    def _request_close(self):
+        try:
+            self._window.evaluate_js('requestNativeClose(); true')
+        except Exception:
+            self.cancel_close()
+
+    def _prepare_update_close(self):
+        finished = threading.Event()
+        saved = []
+        def on_saved(value):
+            saved.append(value is True)
+            finished.set()
+        self._window.evaluate_js('prepareForClose()', callback=on_saved)
+        if not finished.wait(15) or not saved[0]:
+            raise ValueError('Pending changes could not be saved')
 
     def win_minimize(self):
         self._window.minimize()
@@ -246,10 +286,22 @@ class Api:
 
     def open_setup(self):
         """Open the login-details window (a separate process, so the page stays responsive)."""
-        threading.Thread(target=self._run_setup, daemon=True).start()
+        if not self._setup_lock.acquire(blocking=False):
+            return False
+        try:
+            threading.Thread(target=self._run_setup, daemon=True).start()
+        except BaseException:
+            self._setup_lock.release()
+            raise
         return True
 
     def _run_setup(self):
+        try:
+            self._edit_login()
+        finally:
+            self._setup_lock.release()
+
+    def _edit_login(self):
         import subprocess
         before = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
         if getattr(sys, "frozen", False):
@@ -260,7 +312,8 @@ class Api:
         try:
             subprocess.run(cmd, env=env, check=False)
         except Exception as exc:  # noqa: BLE001
-            log_error({"kind": "config", "title": "Could not open login window", "message": str(exc), "details": traceback.format_exc()})
+            import app_errors
+            log_error({"kind": "config", "title": "Could not open login window", "message": type(exc).__name__, "details": app_errors.safe_traceback(exc)})
         after = CREDS_FILE.stat().st_mtime if CREDS_FILE.exists() else None
         if after != before:
             self.focus_end()
@@ -330,7 +383,7 @@ class Api:
         try:
             info = updater.check_for_update(__version__)
         except Exception as exc:  # noqa: BLE001 - offline, rate limited...: never bother the user
-            log_error({"kind": "info", "title": "Update check failed", "message": str(exc), "details": ""})
+            log_error({"kind": "info", "title": "Update check failed", "message": type(exc).__name__, "details": ""})
             return
         if not info:
             return
@@ -373,14 +426,20 @@ class Api:
 
             path = updater.download_and_verify(self._update, progress)
             updater.save_update_notice(ROOT, self._update)
+            self._prepare_update_close()
             self._banner_status("Installing... the app will restart.")
             updater.launch_installer(path, ROOT)
-            time.sleep(1.5)
-            self._window.destroy()  # the installer replaces the exe and starts the new version
+            self._request_close()
         except Exception as exc:  # noqa: BLE001
+            try:
+                self._window.evaluate_js('cancelNativeClose()')
+            except Exception:
+                pass
             self._update_busy = False
-            log_error({"kind": "update", "title": "Update failed", "message": str(exc), "details": traceback.format_exc()})
-            self._banner_status("The update didn't work. Your app is unchanged.", failed=True)
+            import app_errors
+            log_error({"kind": "update", "title": "Update failed", "message": type(exc).__name__, "details": app_errors.safe_traceback(exc)})
+            message = str(exc) if isinstance(exc, updater.UpdateError) else "The update didn't work. Your app is unchanged."
+            self._banner_status(message, failed=True)
 
     def mark_task(self, task_id, done):
         task_state.set_task_done(ROOT, task_id, bool(done))
@@ -398,7 +457,11 @@ class Api:
                 return {'error': 'This note is not available. Sync LVS and try again.'}
             import sync
             session = sync.TimeoutSmartschool(creds)
-            return sync.fetch_lvs_note_detail(session, note_id)
+            detail = sync.fetch_lvs_note_detail(session, note_id)
+            current = credential_store.account_key(credential_store.load_credentials(CREDS_FILE))
+            if data.get('account_key') != current:
+                return {'error': 'Login details changed. Open this note again after syncing.'}
+            return detail
         except Exception:
             return {'error': 'Could not load this note. Check your connection and LVS access, then try again.'}
 
@@ -566,6 +629,7 @@ def main():
     window.events.shown += api._tune_window
     window.events.shown += api._start_update_check
     window.events.closed += api._on_closed
+    window.events.closing += api._on_closing
     window.events.maximized += api._on_maximized
     window.events.restored += api._on_restored
     if just_set_up and not task_state.rendering_choice_pending(ROOT):

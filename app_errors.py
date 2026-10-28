@@ -7,6 +7,7 @@ kinds: login | config | network | server | unknown
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 
 try:  # requests is always installed (smartschool depends on it)
     import requests
@@ -42,6 +43,16 @@ def _chain(exc: BaseException):
         exc = exc.__cause__ or exc.__context__
 
 
+def safe_traceback(exc: BaseException) -> str:
+    """Keep failure locations without copying exception payloads or local paths."""
+    parts = []
+    for error in _chain(exc):
+        parts.append(type(error).__name__)
+        parts.extend(f"  {Path(frame.filename).name}:{frame.lineno} in {frame.name}"
+                     for frame in traceback.extract_tb(error.__traceback__))
+    return "\n".join(parts)
+
+
 def address_problem(main_url: str, details: str = "") -> dict | None:
     """Friendly error if the school address is clearly malformed, else None."""
     u = (main_url or "").strip()
@@ -56,7 +67,7 @@ def address_problem(main_url: str, details: str = "") -> dict | None:
 
 def explain(exc: BaseException, main_url: str = "") -> dict:
     """Friendly description of any exception raised during a sync."""
-    details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    details = safe_traceback(exc)
 
     for e in _chain(exc):
         if isinstance(e, SyncError):
@@ -162,9 +173,8 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
                     "message": "The saved login details file is missing or damaged.",
                     "hint": "Open Change login details and enter them again.", "details": details}
 
-    first = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:300]
     return {"kind": "unknown", "title": "Something went wrong",
-            "message": first or type(exc).__name__,
+            "message": "The operation could not be completed. Open Technical details to see where it failed.",
             "hint": "Press Retry. If it keeps happening, open Technical details below and report it.",
             "details": details}
 

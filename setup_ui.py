@@ -10,9 +10,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import credential_store
+from process_lock import file_lock
 
 PLACEHOLDER_MFA = "REPLACE_ME"  # what credentials.yml.example ships with
 
@@ -46,9 +48,11 @@ def normalize_security(value: str):
             y, d = c, a
         else:
             return v, bad
-    if not (1 <= int(m) <= 12 and 1 <= int(d) <= 31):
+    try:
+        normalized = date(int(y), int(m), int(d)).isoformat()
+    except ValueError:
         return v, bad
-    return f"{y}-{int(m):02d}-{int(d):02d}", None
+    return normalized, None
 
 
 def load_existing(path: Path) -> dict:
@@ -73,6 +77,7 @@ def restrict_permissions(path: Path) -> None:
         pass
 
 
+@credential_store.credential_transaction
 def write_credentials(path: Path, username, password, main_url, mfa="", gemini_key="", recover=False) -> None:
     try:
         data = credential_store.read_config(path)
@@ -98,6 +103,16 @@ def write_credentials(path: Path, username, password, main_url, mfa="", gemini_k
 
 def run_setup(path: Path) -> bool:
     """Show the form. Returns True if credentials were saved."""
+    try:
+        with file_lock(path.parent / 'data' / '.setup.lock', timeout=0):
+            return _run_setup(path)
+    except TimeoutError:
+        from tkinter import messagebox
+        messagebox.showinfo('Login window already open', 'Close the existing login window before opening another one.')
+        return False
+
+
+def _run_setup(path: Path) -> bool:
     import tkinter as tk
     from tkinter import messagebox, ttk
 

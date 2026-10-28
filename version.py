@@ -2,20 +2,17 @@
 
 __version__ = "2.1.2"
 
-# Update these notes alongside the version for each release (offline installer fallback).
-RELEASE_NOTES = """## Task Focus
-Start focusing directly from the new icon beside Pin on a task. A compact,
-resizable window keeps instructions and resources visible, with a stopwatch,
-pause/resume, and optional keep on top. Exit to restore your previous window,
-or mark the task complete separately.
+# Prepared for the next release; the version/tag must be selected before publishing.
+RELEASE_NOTES = """## Reliability and data safety
+Improved deadline parsing, safer handling of incomplete school responses,
+and protection against conflicting saves. Saved sections show a warning when
+they are out of date; permission failures do not restore private cached data.
 
-## Polished Focus interface
-A dedicated layout puts your task first, with a glass bottom bar for session
-controls. Buttons have liquid-glass hover highlights and adapt to Fancy,
-Performance, and Reduced Motion settings.
+## Notes and accessibility
+Pending notes are saved before closing. Keyboard navigation, long text and
+browser dashboard account separation have been improved.
 
-## Faster startup
-The app now avoids unpacking its libraries on every launch and loads optional
-components when needed. Your settings, saved planner data, and login details
-are preserved.
+## Safer updates
+Automatic installation requires a trusted publisher signature. It remains
+paused while signing approval is pending; manual downloads remain available.
 """

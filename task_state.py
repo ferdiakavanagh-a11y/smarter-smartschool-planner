@@ -5,18 +5,17 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 from functools import wraps
 from pathlib import Path
 
-_state_lock = threading.RLock()
+from process_lock import file_lock
 
 
 def state_write(function):
     @wraps(function)
-    def wrapped(*args, **kwargs):
-        with _state_lock:
-            return function(*args, **kwargs)
+    def wrapped(root: Path, *args, **kwargs):
+        with file_lock(root / 'data' / '.state.lock'):
+            return function(root, *args, **kwargs)
     return wrapped
 
 
@@ -39,23 +38,32 @@ def _file_path(root: Path) -> Path:
     return root / "data" / "completed_tasks.json"
 
 
-def load_completed_ids(root: Path) -> set[str]:
-    path = _file_path(root)
-    if not path.exists():
-        return set()
+def _load_json(path: Path, container_type, strict: bool):
     try:
-        return set(json.loads(path.read_text(encoding="utf-8")))
-    except (json.JSONDecodeError, OSError):
-        return set()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, container_type) or (isinstance(data, list) and not all(isinstance(x, str) for x in data)):
+            raise ValueError('Invalid saved state')
+        return data
+    except FileNotFoundError:
+        return container_type()
+    except (ValueError, OSError):
+        if strict:
+            raise ValueError(f'Could not read {path.name}. Existing data was kept.') from None
+        return container_type()
 
 
+def load_completed_ids(root: Path, *, strict: bool = False) -> set[str]:
+    return set(_load_json(_file_path(root), list, strict))
+
+
+@state_write
 def save_completed_ids(root: Path, ids: set[str]) -> None:
     _atomic_json(_file_path(root), sorted(ids))
 
 
 @state_write
 def set_task_done(root: Path, task_id: str, done: bool) -> set[str]:
-    ids = load_completed_ids(root)
+    ids = load_completed_ids(root, strict=True)
     if done:
         ids.add(task_id)
     else:
@@ -70,15 +78,8 @@ def _settings_path(root: Path) -> Path:
     return root / "data" / "ui_settings.json"
 
 
-def load_settings(root: Path) -> dict:
-    path = _settings_path(root)
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+def load_settings(root: Path, *, strict: bool = False) -> dict:
+    return _load_json(_settings_path(root), dict, strict)
 
 
 def date_checker_mode(root: Path, gemini_key) -> str:
@@ -94,6 +95,7 @@ def date_checker_state(root: Path) -> dict:
     return {'mode': date_checker_mode(root, key), 'geminiAvailable': bool(str(key or '').strip())}
 
 
+@state_write
 def set_setting(root: Path, key: str, value) -> dict:
     if key == "renderingMode" and value not in ("performance", "fancy"):
         raise ValueError("Unknown rendering mode")
@@ -102,19 +104,9 @@ def set_setting(root: Path, key: str, value) -> dict:
             raise ValueError('Unknown date checker')
         if value == 'gemini' and not date_checker_state(root)['geminiAvailable']:
             raise ValueError('A Gemini API key is required')
-    settings = load_settings(root)
+    settings = load_settings(root, strict=True)
     settings[key] = value
-    path = _settings_path(root)
-    path.parent.mkdir(exist_ok=True)
-    # A failed write must not destroy previously saved appearance preferences.
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as file:
-        temporary = Path(file.name)
-        try:
-            file.write(json.dumps(settings))
-            file.close()
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+    _atomic_json(_settings_path(root), settings)
     return settings
 
 
@@ -132,17 +124,13 @@ def _notes_path(root: Path) -> Path:
     return root / "data" / "task_notes.json"
 
 
-def load_pinned_ids(root: Path) -> list[str]:
-    try:
-        data = json.loads(_pinned_path(root).read_text(encoding="utf-8"))
-        return [str(x) for x in data] if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
-        return []
+def load_pinned_ids(root: Path, *, strict: bool = False) -> list[str]:
+    return _load_json(_pinned_path(root), list, strict)
 
 
 @state_write
 def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
-    ids = [i for i in load_pinned_ids(root) if i != task_id]
+    ids = [i for i in load_pinned_ids(root, strict=True) if i != task_id]
     if pinned:
         ids.append(task_id)
     path = _pinned_path(root)
@@ -150,17 +138,14 @@ def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
     return ids
 
 
-def load_notes(root: Path) -> dict[str, str]:
-    try:
-        data = json.loads(_notes_path(root).read_text(encoding="utf-8"))
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+def load_notes(root: Path, *, strict: bool = False) -> dict[str, str]:
+    data = _load_json(_notes_path(root), dict, strict)
+    return {str(k): str(v) for k, v in data.items()}
 
 
 @state_write
 def set_note(root: Path, task_id: str, text: str) -> dict[str, str]:
-    notes = load_notes(root)
+    notes = load_notes(root, strict=True)
     text = (text or "").strip()
     if len(text) > 5000:
         raise ValueError('Notes can contain up to 5000 characters. The original note was kept.')
@@ -179,7 +164,7 @@ def migrate_task_ids(root: Path, aliases: dict) -> None:
     aliases = {old: new for old, new in aliases.items() if old != new}
     if not aliases:
         return
-    completed, pinned, notes = load_completed_ids(root), load_pinned_ids(root), load_notes(root)
+    completed, pinned, notes = load_completed_ids(root, strict=True), load_pinned_ids(root, strict=True), load_notes(root, strict=True)
     for old, new in aliases.items():
         if old in completed:
             completed.add(new)

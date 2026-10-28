@@ -71,8 +71,8 @@ and links out to Smartschool.
 The app never syncs on its own when you open it. It shows the last saved data
 straight away when it belongs to the approved account. After changing accounts,
 old data is hidden until that account syncs successfully. Click the sync button to log in and fetch fresh data (the very
-first sync runs automatically right after you save your details in the setup
-window). A sync takes a few seconds.
+first sync runs after saving details and choosing a rendering mode if prompted).
+Sync duration depends on the school endpoints and number of assignments.
 
 If login fails, the usual causes are a wrong username or password, `main_url`
 being wrong (it must not start with `https://`), or the security answer
@@ -130,5 +130,5 @@ benchmarks alone do not measure frame rate.
   directly, or edit the numbers in `run_daily.bat` / `desktop_app.py`.
 - `python build_dashboard.py` still works too, producing a plain
   `dashboard.html` you can open in any browser - same look as the app, but
-  read-only (no persistent checkboxes), for whenever you don't want to run
-  the Python app itself.
+  with browser-local checkboxes, pins and notes scoped to that account, for
+  whenever you don't want to run the Python app itself. It cannot sync live data.

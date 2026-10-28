@@ -1,4 +1,4 @@
-; Inno Setup script. Compile with build_installer.bat (needs Inno Setup 6).
+; Inno Setup script. Compile with setup_and_build.bat (needs Inno Setup 6).
 #define AppName "Smartschool Planner"
 #define AppExe "SmartschoolPlanner.exe"
 #ifndef AppVersion
@@ -23,6 +23,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
+CloseApplicationsFilter={#AppExe}
+RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
@@ -47,15 +49,6 @@ var
 function LaunchParameters(Param: String): String;
 begin
   if WasUpgrade then Result := '--updated' else Result := '';
-end;
-
-function InitializeSetup: Boolean;
-var RC: Integer;
-begin
-  { end the running app first: Inno's own "close applications" step can't, and then rolls back }
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExe}', '', SW_HIDE, ewWaitUntilTerminated, RC);
-  Sleep(1000);
-  Result := True;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

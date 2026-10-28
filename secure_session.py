@@ -33,7 +33,10 @@ class EncryptedCookieJar(LWPCookieJar):
 class SecureSmartschool(Smartschool):
     def __init__(self, creds, root: Path):
         self._storage_root = root
+        password = creds.password
         super().__init__(creds)
+        # The dependency trims every credential field; preserve significant password whitespace.
+        object.__setattr__(self.creds, 'password', password)
 
     @property
     def cache_path(self):

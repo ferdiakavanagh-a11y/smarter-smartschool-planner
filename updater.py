@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import re
+import secrets
 import subprocess
 import tempfile
 import time
@@ -19,10 +20,14 @@ REPO = "ferdiakavanagh-a11y/smarter-smartschool-planner"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"  # skips drafts and prereleases
 INSTALLER_NAME = "SmartschoolPlanner-Setup.exe"
 CHECKSUM_NAME = INSTALLER_NAME + ".sha256"
-ALLOWED_HOSTS = {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
+ALLOWED_HOSTS = {"api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
 MAX_INSTALLER_BYTES = 300 * 1024 * 1024
+MAX_RELEASE_BYTES = 2 * 1024 * 1024
 TIMEOUT = 20
 ALLOW_ANY_URL_FOR_TESTS = False  # only the offline tests flip this
+# Populate with the approved signing certificate's SHA-256 fingerprint before releasing signed updates.
+TRUSTED_SIGNER_SHA256: frozenset[str] = frozenset()
+_download_tokens: dict[Path, str] = {}
 
 
 class UpdateError(Exception):
@@ -42,14 +47,26 @@ def is_newer(latest: tuple[int, ...], current: tuple[int, ...]) -> bool:
 def _url_ok(url: str) -> bool:
     if ALLOW_ANY_URL_FOR_TESTS:
         return True
-    p = urlparse(url)
-    host = (p.hostname or "").lower()
-    return p.scheme == "https" and (host in ALLOWED_HOSTS or host.endswith(".githubusercontent.com"))
+    try:
+        p = urlparse(url)
+        return (p.scheme == "https" and (p.hostname or "").lower() in ALLOWED_HOSTS
+                and p.port in (None, 443) and p.username is None and p.password is None)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+class _UpdateRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _url_ok(newurl):
+            raise UpdateError("The update redirected to an unexpected address, so it was refused.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _open(url: str, accept: str = "*/*"):
+    if not _url_ok(url):
+        raise UpdateError("The update address was unexpected, so it was refused.")
     req = urllib.request.Request(url, headers={"User-Agent": "SmartschoolPlanner-updater", "Accept": accept})
-    resp = urllib.request.urlopen(req, timeout=TIMEOUT)  # noqa: S310 - https only, checked below
+    resp = urllib.request.build_opener(_UpdateRedirectHandler()).open(req, timeout=TIMEOUT)
     if not _url_ok(resp.geturl()):
         resp.close()
         raise UpdateError("The update was offered from an unexpected address, so it was refused.")
@@ -58,11 +75,13 @@ def _open(url: str, accept: str = "*/*"):
 
 def check_for_update(current_version: str) -> dict | None:
     """Info about a newer release ({version, tag, installer_url, checksum_url, digest, size, page}) or None."""
-    with urllib.request.urlopen(
-        urllib.request.Request(API_URL, headers={"User-Agent": "SmartschoolPlanner-updater", "Accept": "application/vnd.github+json"}),
-        timeout=TIMEOUT,
-    ) as resp:  # noqa: S310
-        data = json.loads(resp.read().decode("utf-8"))
+    with _open(API_URL, "application/vnd.github+json") as resp:
+        body = resp.read(MAX_RELEASE_BYTES + 1)
+    if len(body) > MAX_RELEASE_BYTES:
+        raise UpdateError("The release information was too large.")
+    data = json.loads(body.decode("utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("assets", []), list):
+        raise UpdateError("The release information was not in the expected format.")
     if data.get("draft") or data.get("prerelease"):
         return None
     tag = str(data.get("tag_name") or "")
@@ -70,7 +89,8 @@ def check_for_update(current_version: str) -> dict | None:
     stable_over_beta = latest == current and "-" in current_version.split("+", 1)[0] and "-" not in tag.split("+", 1)[0]
     if latest is None or current is None or not (is_newer(latest, current) or stable_over_beta):
         return None
-    assets = {a.get("name"): a for a in data.get("assets", [])}
+    assets = {a.get("name"): a for a in data.get("assets", [])
+              if isinstance(a, dict) and isinstance(a.get("name"), str)}
     installer = assets.get(INSTALLER_NAME)
     if not installer:
         return None  # release exists but the installer isn't attached yet
@@ -143,8 +163,46 @@ def _expected_hash(info: dict) -> str:
     raise UpdateError("This release has no checksum, so it can't be verified. Update was cancelled.")
 
 
+def verify_installer_signature(path: Path) -> None:
+    """Require Windows trust validation and the publisher certificate pinned in this app."""
+    if not TRUSTED_SIGNER_SHA256:
+        raise UpdateError("Automatic installation is paused until signed releases are available. Use the project's Releases page for manual downloads.")
+    literal = "'" + str(path.resolve()).replace("'", "''") + "'"
+    script = ("$ErrorActionPreference='Stop'; $s=Get-AuthenticodeSignature -LiteralPath " + literal + "; "
+              "@{status=[string]$s.Status; certificate=$(if($s.SignerCertificate){"
+              "[Convert]::ToBase64String($s.SignerCertificate.RawData)}else{''})}|ConvertTo-Json -Compress")
+    try:
+        result = subprocess.run(
+            [str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+             '-NoProfile', '-NonInteractive', '-EncodedCommand', base64.b64encode(script.encode('utf-16-le')).decode('ascii')],
+            capture_output=True, text=True, timeout=30, check=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        signature = json.loads(result.stdout.lstrip('\ufeff'))
+        fingerprint = hashlib.sha256(base64.b64decode(signature['certificate'], validate=True)).hexdigest()
+        if signature['status'] == 'Valid' and fingerprint in TRUSTED_SIGNER_SHA256:
+            return
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass
+    raise UpdateError("The installer is unsigned or its publisher could not be verified. Nothing was installed.")
+
+
+def _cleanup_token(path: Path) -> str | None:
+    token = _download_tokens.get(path)
+    try:
+        if (token and path.name == INSTALLER_NAME and path.parent.parent.resolve() == Path(tempfile.gettempdir()).resolve()
+                and path.parent.resolve() == path.parent.absolute()
+                and (path.parent / '.ssp-owner').read_text(encoding='ascii') == token):
+            return token
+    except OSError:
+        pass
+    return None
+
+
 def download_and_verify(info: dict, progress=None) -> Path:
     """Download the installer to a temp folder and check its SHA-256. Raises UpdateError if anything is off."""
+    if not TRUSTED_SIGNER_SHA256:
+        verify_installer_signature(Path(INSTALLER_NAME))
     url = info.get("installer_url") or ""
     if not _url_ok(url):
         raise UpdateError("The installer address was unexpected, so the update was refused.")
@@ -170,8 +228,14 @@ def download_and_verify(info: dict, progress=None) -> Path:
         with open(path, "rb") as f:
             if f.read(2) != b"MZ":
                 raise UpdateError("The download isn't a Windows program. Nothing was installed.")
+        verify_installer_signature(path)
+        token = secrets.token_hex(32)
+        (path.parent / '.ssp-owner').write_text(token, encoding='ascii')
+        _download_tokens[path] = token
     except BaseException:
         path.unlink(missing_ok=True)
+        (path.parent / '.ssp-owner').unlink(missing_ok=True)
+        path.parent.rmdir()
         raise
     return path
 
@@ -179,12 +243,27 @@ def download_and_verify(info: dict, progress=None) -> Path:
 def launch_installer(path: Path, root: Path | None = None) -> None:
     """Start the installer with no window at all (it closes this app, replaces the files and relaunches it)."""
     root = root or Path(__file__).resolve().parent
+    verify_installer_signature(path)
     def literal(value):
         return "'" + str(value).replace("'", "''") + "'"
     result = root / 'data' / 'install_result.json'
     result.parent.mkdir(exist_ok=True)
     result.unlink(missing_ok=True)
-    # A separate PowerShell worker survives the installer's taskkill of the app EXE.
+    cleanup = ''
+    token = _cleanup_token(path)
+    if token:
+        cleanup = f"""
+try {{
+  $folder = Get-Item -LiteralPath {literal(path.parent)} -Force
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+      [IO.File]::ReadAllText({literal(path.parent / '.ssp-owner')}) -eq {literal(token)}) {{
+    Remove-Item -LiteralPath {literal(path)} -Force
+    Remove-Item -LiteralPath {literal(path.parent / '.ssp-owner')} -Force
+    [IO.Directory]::Delete({literal(path.parent)}, $false)
+  }}
+}} catch {{ }}
+"""
+    # The hidden monitor survives the app's graceful exit.
     script = f"""
 $ErrorActionPreference = 'Stop'
 [System.IO.File]::WriteAllText({literal(result)}, '{{"status":"running"}}')
@@ -193,6 +272,7 @@ try {{
   $process = Start-Process -FilePath {literal(path)} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS' -WindowStyle Hidden -PassThru -Wait
   $code = $process.ExitCode
 }} catch {{ $code = -1 }}
+{cleanup}
 $result = @{{status = $(if ($code -eq 0) {{'ok'}} else {{'failed'}}); code = $code}} | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText({literal(result.with_suffix('.tmp'))}, $result)
 Move-Item -LiteralPath {literal(result.with_suffix('.tmp'))} -Destination {literal(result)} -Force

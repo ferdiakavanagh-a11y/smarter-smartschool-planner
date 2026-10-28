@@ -6,16 +6,24 @@ from ctypes import wintypes
 import hashlib
 import json
 import os
+from functools import wraps
 from pathlib import Path
 import tempfile
-import threading
 import uuid
 from urllib.parse import urlsplit
 
 import yaml
+from process_lock import file_lock
 
 SECRET_FIELDS = ('username', 'password', 'mfa', 'gemini_api_key')
-_lock = threading.RLock()
+
+
+def credential_transaction(function):
+    @wraps(function)
+    def wrapped(path: Path, *args, **kwargs):
+        with file_lock(path.parent / 'data' / '.credentials.lock'):
+            return function(path, *args, **kwargs)
+    return wrapped
 
 
 class CredentialError(ValueError):
@@ -88,13 +96,16 @@ def _delete(target: str) -> None:
         raise CredentialError('Windows could not remove saved login details.')
 
 
+@credential_transaction
 def read_config(path: Path) -> dict:
     try:
-        data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        data = yaml.safe_load(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         return {}
     except (yaml.YAMLError, UnicodeError):
         raise CredentialError('The login configuration is invalid. Use Change login info.') from None
+    if data is None:
+        return {}
     if not isinstance(data, dict):
         raise CredentialError('The login configuration is invalid. Use Change login info.')
     return data
@@ -102,7 +113,11 @@ def read_config(path: Path) -> dict:
 
 def save_credentials(path: Path, data: dict) -> None:
     """Commit a verified new vault entry before atomically replacing the YAML."""
-    with _lock:
+    with file_lock(path.parent / 'data' / '.credentials.lock'):
+        try:
+            old = read_config(path).get('vault_target', data.get('vault_target'))
+        except CredentialError:
+            old = data.get('vault_target')  # Setup keeps an encrypted recovery copy before replacement.
         config = {k: v for k, v in data.items() if k not in SECRET_FIELDS and k != 'vault_target'}
         secrets = {k: str(data.get(k) or '') for k in SECRET_FIELDS}
         secrets['main_url'] = school_origin(data.get('main_url'))
@@ -140,18 +155,20 @@ def save_credentials(path: Path, data: dict) -> None:
                 temporary.unlink(missing_ok=True)
             if not committed:
                 _delete(target)
-        old = data.get('vault_target')
         if isinstance(old, str) and old.startswith(_prefix(path)) and old != target:
             try:
                 from secure_session import remove_legacy_session
                 remove_legacy_session(_read(old)['username'])
-                _delete(old)
             except (CredentialError, OSError):
+                pass
+            try:
+                _delete(old)
+            except CredentialError:
                 pass  # Uninstall also removes orphaned entries belonging to this installation.
 
 
 def load_credentials(path: Path) -> dict:
-    with _lock:
+    with file_lock(path.parent / 'data' / '.credentials.lock'):
         config = read_config(path)
         target = config.get('vault_target')
         if target:
@@ -171,6 +188,7 @@ def load_credentials(path: Path) -> dict:
         return config
 
 
+@credential_transaction
 def load_for_setup(path: Path) -> dict:
     """Pre-fill recovery safely, but require the password again for an unapproved origin."""
     config = read_config(path)
@@ -194,6 +212,13 @@ def smartschool_credentials(path: Path):
 
 
 def clear_credentials(path: Path) -> None:
+    # An open editor must close before uninstall can remove the vault entries.
+    with file_lock(path.parent / 'data' / '.setup.lock', timeout=0):
+        _clear_credentials(path)
+
+
+@credential_transaction
+def _clear_credentials(path: Path) -> None:
     """Delete only this installation's generic entries, including interrupted saves."""
     api = _api()
     count = wintypes.DWORD()
@@ -210,6 +235,6 @@ def clear_credentials(path: Path) -> None:
         from secure_session import remove_legacy_session
         try:
             remove_legacy_session(_read(target)['username'])
-        except CredentialError:
-            pass  # A damaged entry must still be deleted.
+        except (CredentialError, OSError):
+            pass  # Unreadable legacy files must not prevent vault cleanup.
         _delete(target)

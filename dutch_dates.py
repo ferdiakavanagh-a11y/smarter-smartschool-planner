@@ -57,14 +57,17 @@ DUTCH_MONTHS = {
     "january": 1,
     "february": 2,
     "march": 3,
+    "may": 5,
     "june": 6,
     "july": 7,
+    "august": 8,
     "october": 10,
     # French
     "janvier": 1,
     "février": 2,
     "mars": 3,
     "avril": 4,
+    "mai": 5,
     "juin": 6,
     "juillet": 7,
     "août": 8,
@@ -83,7 +86,7 @@ DUTCH_MONTHS = {
 # Bare "op" is excluded as too common (tests use narrower phrases like "toets op ..."); bare "voor"
 # stays in on purpose ("voor vrijdag" = before Friday), so the date checks below filter false hits.
 SIGNAL_WORDS = re.compile(
-    r"(tegen|ten\s+laatste(?:\s+op)?|deadline|uiterlijk(?:\s+(?:op|tegen))?|"
+    r"\b(tegen|ten\s+laatste(?:\s+op)?|deadline|uiterlijk(?:\s+(?:op|tegen))?|"
     r"in\s+te\s+dienen(?:\s+tegen|\s+op)?|"
     r"indienen(?:\s+tegen|\s+op)?|insturen(?:\s+tegen|\s+op)?|binnenbrengen(?:\s+tegen|\s+op)?|"
     r"af\s+te\s+geven(?:\s+tegen|\s+op)?|klaar\s+tegen|"
@@ -95,13 +98,14 @@ SIGNAL_WORDS = re.compile(
     # German
     r"bis\s+zum|abzugeben|f[äa]llig(?:\s+am)?|sp[äa]testens(?:\s+am)?|abgabetermin\s*:?|"
     # English (not bare "due": "due to")
-    r"due\s*:|due\s+(?:by|on|date)|hand\s+in\s+by|submit\s+by|turn\s+in\s+by|complete\s+by)\b",
+    r"due\s*:|due\s+(?:by|on|date)|hand\s+in\s+by|submit\s+by|turn\s+in\s+by|complete\s+by)(?:\b|(?<=:))",
     re.IGNORECASE,
 )
 
-NUMERIC_DATE = re.compile(r"\b(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?\b")
+ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+NUMERIC_DATE = re.compile(r"(?<![\w/.-])(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2}|\d{4}))?(?!\w|[/.-]\d)")
 MONTH_NAME_DATE = re.compile(
-    r"\b(\d{1,2})\s+(" + "|".join(DUTCH_MONTHS.keys()) + r")\b", re.IGNORECASE
+    r"\b(\d{1,2})\s+(" + "|".join(DUTCH_MONTHS.keys()) + r")\b(?:\s+(\d{4})\b)?", re.IGNORECASE
 )
 WEEKDAY_NAME = re.compile(r"\b(" + "|".join(DUTCH_WEEKDAYS.keys()) + r")\b", re.IGNORECASE)
 
@@ -143,6 +147,12 @@ def _candidates(snippet: str, reference_date: date) -> list[tuple[int, int, date
     """Every date found in the snippet as (start, end, date)."""
     found: list[tuple[int, int, date]] = []
 
+    for m in ISO_DATE.finditer(snippet):
+        try:
+            found.append((m.start(), m.end(), date.fromisoformat(m.group())))
+        except ValueError:
+            continue
+
     for m in NUMERIC_DATE.finditer(snippet):
         before = snippet[max(0, m.start() - 25) : m.start()]
         after = snippet[m.end() : m.end() + 6]
@@ -165,7 +175,9 @@ def _candidates(snippet: str, reference_date: date) -> list[tuple[int, int, date
 
     for m in MONTH_NAME_DATE.finditer(snippet):
         try:
-            found.append((m.start(), m.end(), _resolve_year(reference_date, DUTCH_MONTHS[m.group(2).lower()], int(m.group(1)))))
+            month, day = DUTCH_MONTHS[m.group(2).lower()], int(m.group(1))
+            resolved = date(int(m.group(3)), month, day) if m.group(3) else _resolve_year(reference_date, month, day)
+            found.append((m.start(), m.end(), resolved))
         except ValueError:
             continue
 
