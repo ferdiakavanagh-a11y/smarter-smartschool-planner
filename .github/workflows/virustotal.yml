@@ -51,8 +51,7 @@ jobs:
           curl --fail --silent --show-error --max-time 60 \
             --header "x-apikey: $VIRUSTOTAL_API_KEY" \
             'https://www.virustotal.com/api/v3/files/upload_url' --output upload.json
-          upload_url=$(jq -er '.data' upload.json)
-          [[ "$upload_url" == https://www.virustotal.com/* ]] || { echo 'Unexpected VirusTotal upload host'; exit 1; }
+          upload_url=$(python3 -c 'import json; from urllib.parse import urlsplit, urlunsplit; p=urlsplit(json.load(open("upload.json"))["data"]); assert p.scheme in ("http","https") and p.hostname and (p.hostname=="virustotal.com" or p.hostname.endswith(".virustotal.com")) and p.port in (None,443) and p.username is None and p.password is None, "Unexpected VirusTotal upload address"; print(urlunsplit(("https",p.netloc,p.path,p.query,p.fragment)))')
           curl --fail --silent --show-error --max-time 600 \
             --header "x-apikey: $VIRUSTOTAL_API_KEY" \
             --form 'file=@SmartschoolPlanner-Setup.exe' "$upload_url" --output analysis.json
