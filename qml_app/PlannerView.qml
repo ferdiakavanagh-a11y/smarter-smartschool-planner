@@ -10,6 +10,13 @@ ColumnLayout {
     property bool pinsOnly: false
     property string kind: 'All types'
     property bool completedOpen: false
+    property bool entryPending:true
+    property int entryFrames:0
+    property bool centeredEntry:false
+    function requestEntry(){entryPending=true;entryFrames=0;app.headerCollapsed=false;scrollMotion.stop();list.cancelFlick();Qt.callLater(list.positionEntry)}
+    Component.onCompleted:requestEntry()
+    onVisibleChanged:if(visible)requestEntry()
+    Connections {target:tasks;function onChoicesChanged(){if(planner.visible)planner.requestEntry()}}
     property int activeRemovals:0
     property bool keepCompletionTop:false
     function finishFeedback(){Qt.callLater(function(){
@@ -22,9 +29,9 @@ ColumnLayout {
     function benchmarkScroll(f){list.contentY=list.originY+Math.max(0,list.contentHeight-list.height)*f}
     function benchmarkSearch(text){app.searchText=text;applyFilters()}
     function focusSearch(){app.searchOpen=true;app.searchFocus()}
-    Connections {target:app;function onSearchTextChanged(){if(planner.visible)debounce.restart()} function onSectionChanged(){if(app.section>=2)return;course='All courses';kind='All types';tasks.setSection(app.section);applyFilters()}}
+    Connections {target:app;function onSearchTextChanged(){if(planner.visible)debounce.restart()} function onSectionChanged(){if(app.section>=2)return;course='All courses';kind='All types';tasks.setSection(app.section);applyFilters();requestEntry()}}
     Timer {id:debounce;interval:140;onTriggered:planner.applyFilters()}
-    Connections {target:Theme;function onTextScaleChanged(){Qt.callLater(list.positionViewAtBeginning)}}
+    Connections {target:Theme;function onTextScaleChanged(){planner.requestEntry()}}
     Item {id:chipsSlot;objectName:'filterSlot';Layout.fillWidth:true;Layout.leftMargin:-10;Layout.rightMargin:-10;implicitHeight:56
     Flickable {
         id:chips;objectName:'filterChips';parent:app.controlsLayer;width:chipsSlot.width;height:chipsSlot.height;clip:true
@@ -48,19 +55,33 @@ ColumnLayout {
     }
     ListView {
         id:list;objectName:'taskList';
-        function resetTop(){scrollMotion.stop();forceLayout();positionViewAtBeginning()}
+        opacity:planner.entryPending?0:1
+        function positionEntry(){
+            if(!planner.visible||height<=0)return
+            forceLayout()
+            let index=app.section===0&&!app.searchText.trim()?tasks.todayIndex():-1
+            planner.centeredEntry=index>=0
+            if(index>=0)positionViewAtIndex(index,ListView.Center)
+            else positionViewAtBeginning()
+        }
+        function resetTop(){planner.centeredEntry=false;scrollMotion.stop();forceLayout();positionViewAtBeginning()}
         Layout.fillWidth:true;Layout.fillHeight:true;Layout.leftMargin:-16;Layout.rightMargin:-16
-        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;bottomMargin:100*Theme.textScale
+        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:planner.centeredEntry?height/2:0;bottomMargin:Math.max(100*Theme.textScale,planner.centeredEntry?height/2:0)
         displayMarginBeginning:220*Theme.textScale
-        Connections {target:app.sceneReady?null:app
-            function onFrameSwapped(){Qt.callLater(function(){list.resetTop();app.sceneReady=true})}
+        Connections {target:app
+            function onFrameSwapped(){
+                if(!planner.entryPending||!planner.visible||list.height<=0)return
+                list.positionEntry()
+                if(++planner.entryFrames>=2){planner.entryPending=false;app.sceneReady=true}
+            }
         }
         boundsBehavior:Flickable.DragOverBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:'Tasks grouped by due date'
         ScrollBar.vertical:ScrollBar{}
         SmoothScroll { id:scrollMotion; objectName:'taskScrollMotion'; view:list }
         removeDisplaced:Transition {NumberAnimation {property:'y';duration:Theme.motion?260:0;easing.type:Easing.OutCubic}}
-        onWidthChanged:Qt.callLater(resetTop)
+        onWidthChanged:if(planner.entryPending)Qt.callLater(positionEntry)
         onContentYChanged:{
+            if(planner.entryPending)return
             if(planner.activeRemovals&&(dragging||scrollMotion.glide.running))planner.keepCompletionTop=false
             if(planner.visible&&!planner.activeRemovals)app.headerCollapsed=app.sceneReady&&contentY-originY>80&&!app.searchOpen
         }

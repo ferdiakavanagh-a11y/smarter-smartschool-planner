@@ -107,6 +107,16 @@ class Tasks(QAbstractListModel):
     def groupCounts(self):
         return dict(Counter(t['group'] for t in self.rows if not t['done'] or t['group']=='Completed'))
 
+    @Slot(result=int)
+    def todayIndex(self):
+        active = [(i, task) for i, task in enumerate(self.rows) if not task['done']]
+        today = self.today.isoformat()
+        exact = next((i for i, task in active if task['group'] == 'Today'), None)
+        if exact is not None:
+            return exact
+        future = [(task['due'], i) for i, task in active if task['due'] >= today]
+        return min(future)[1] if future else active[-1][0] if active else -1
+
     @Slot(int)
     def setSection(self, section):
         self.section = section

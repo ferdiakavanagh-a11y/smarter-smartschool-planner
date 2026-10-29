@@ -114,8 +114,8 @@ ApplicationWindow {
         readonly property real glassMotion:tabShift.x
         Item {id:headerFrame;Layout.fillWidth:true;implicitHeight:app.headerCollapsed&&!app.searchOpen?0:75*Theme.textScale;clip:app.headerCollapsed;z:3
             opacity:app.headerCollapsed&&!app.searchOpen?0:1
-            Behavior on opacity{NumberAnimation{duration:Theme.motion?200:0}}
-            Behavior on implicitHeight{NumberAnimation{duration:Theme.motion?300:0;easing.type:Easing.OutCubic}}
+            Behavior on opacity{enabled:!planner.entryPending&&!sectionPages.topResetPending;NumberAnimation{duration:Theme.motion?200:0}}
+            Behavior on implicitHeight{enabled:!planner.entryPending&&!sectionPages.topResetPending;NumberAnimation{duration:Theme.motion?300:0;easing.type:Easing.OutCubic}}
             Item {anchors.fill:parent;anchors.leftMargin:0;anchors.rightMargin:0
                 ColumnLayout {anchors.left:parent.left;anchors.right:headerSlot.left;anchors.rightMargin:16;anchors.verticalCenter:parent.verticalCenter;spacing:3
                     Label {textFormat:Text.PlainText;text:['Planner','Missed','Schedule','All Classes','Grades','LVS'][app.section];font.pixelSize:34*Theme.textScale;font.bold:true;color:Theme.text

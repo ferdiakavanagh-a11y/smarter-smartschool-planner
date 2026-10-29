@@ -6,6 +6,8 @@ ListView {
     required property var app
     property var readNotes: ({})
     property bool topResetPending:false
+    property int entryFrames:0
+    opacity:topResetPending?0:1
     property string gradeCourse:'All subjects'
     readonly property bool courseMenuVisible:headerItem?headerItem.courseMenuVisible:false
     function resetTop(){
@@ -20,10 +22,10 @@ ListView {
                 if(model[i].date>=today){target=i;break}
             }
             if(target<0)target=lastDay
-            if(target>=0)positionViewAtIndex(target,ListView.Beginning)
+            if(target>=0)positionViewAtIndex(target,ListView.Center)
         }
     }
-    function requestTop(){topResetPending=true;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
+    function requestTop(){topResetPending=true;entryFrames=0;app.headerCollapsed=false;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
     onVisibleChanged:if(visible&&app.section>=2)requestTop()
     onHeightChanged:if(topResetPending&&height>0)Qt.callLater(resetTop)
     function flatten(groups){
@@ -34,7 +36,7 @@ ListView {
     }
     signal detail(string title,string body)
     Layout.leftMargin:-16;Layout.rightMargin:-16
-    clip:false;spacing:0;bottomMargin:120*Theme.textScale;reuseItems:true;cacheBuffer:180
+    clip:false;spacing:0;topMargin:(app.section===2||app.section===3)&&!app.searchText.trim()?height/2:0;bottomMargin:Math.max(120*Theme.textScale,topMargin);reuseItems:true;cacheBuffer:180
     displayMarginBeginning:220*Theme.textScale
     model: {
         let revision=app.fixtureRevision
@@ -69,7 +71,7 @@ ListView {
         function onSectionChanged(){if(app.section>=2)view.requestTop()}
         function onSearchTextChanged(){if(view.visible)view.requestTop()}
         function onFixtureRevisionChanged(){view.readNotes={};if(app.production&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects';if(view.visible&&(app.section===2||app.section===3))view.requestTop()}
-        function onFrameSwapped(){if(view.topResetPending&&view.visible&&view.height>0){view.resetTop();view.topResetPending=false}}
+        function onFrameSwapped(){if(view.topResetPending&&view.visible&&view.height>0){view.resetTop();if(++view.entryFrames>=2)view.topResetPending=false}}
     }
     onContentYChanged:if(view.visible&&!topResetPending)app.headerCollapsed=contentY-originY>80&&!app.searchOpen
     header:Column {

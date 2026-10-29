@@ -33,3 +33,6 @@ tasks/
 /qml_app/LIQUID_MENU_RESEARCH.md
 /qml_app/LIQUID_SHADING_RESEARCH.md
 /qml_app/gpu_probe.ps1
+
+# Local external scan helpers and reports
+/.github/workflows/virustotal.yml
