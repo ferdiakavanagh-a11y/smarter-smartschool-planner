@@ -2,7 +2,7 @@
 #define AppName "Smartschool Planner"
 #define AppExe "SmartschoolPlanner.exe"
 #ifndef AppVersion
-  #define AppVersion "3.0.0"  ; the release workflow passes the real one from version.py
+  #define AppVersion "3.0.0-alpha"  ; the release workflow passes the real one from version.py
 #endif
 
 [Setup]
