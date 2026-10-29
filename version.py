@@ -1,6 +1,6 @@
 """Shared application and installer release version."""
 
-__version__ = "3.0.0-alpha"
+__version__ = "3.0.0"
 
 RELEASE_NOTES = """## New native desktop interface
 The planner now uses Qt Quick with liquid glass controls, smooth navigation,
