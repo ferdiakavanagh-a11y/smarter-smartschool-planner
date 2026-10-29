@@ -80,7 +80,7 @@ ListView {
         Item {id:gradeSlot;visible:app.section===4&&app.production;width:parent.width;height:visible?48:0
             GlassComboBox {id:gradePicker;objectName:'gradeCourseFilter';parent:app.controlsLayer
                 readonly property point origin:app.controlPosition(gradeSlot)
-                x:origin.x;y:origin.y;visible:gradeSlot.visible&&view.visible&&!app.focusOpen
+                x:origin.x;y:origin.y;visible:gradeSlot.visible&&view.visible&&!app.focusOpen&&origin.y>=app.controlPosition(view).y-1
                 width:Math.min(gradeSlot.width,Math.max(160,implicitContentWidth+46)*Theme.textScale);height:40
                 selectorMaterial:true;backdrop:app.controlsBackdrop
                 model:app.production?backend.gradeCourses:[];currentIndex:Math.max(0,model.indexOf(view.gradeCourse));Accessible.name:'Filter grades by subject'
@@ -93,7 +93,7 @@ ListView {
     delegate:Column {
         id:entry;required property var modelData;width:view.width-32;spacing:0
         transform:Translate{x:16}
-        Item {width:1;height:entry.modelData.first?12:0}
+        Item {width:1;height:entry.modelData.first?14:0}
         RowLayout {width:parent.width;visible:entry.modelData.heading!==''
             Label {textFormat:Text.PlainText;text:entry.modelData.heading;color:Theme.text;font.pixelSize:22*Theme.textScale;font.bold:true;padding:8;Layout.fillWidth:true;wrapMode:Text.Wrap}
             Label {textFormat:Text.PlainText;text:entry.modelData.average||'';color:Theme.secondary;font.pixelSize:14*Theme.textScale;padding:8}
@@ -110,37 +110,40 @@ ListView {
                         property bool lesson:app.section===2||app.section===3
                         property bool summary:modelData.kind==='summary'
                         property color scoreInk:modelData.tone==='red'?Theme.red:modelData.tone==='orange'?Theme.orange:modelData.tone==='green'?Theme.green:Theme.text
-                        width:groupRows.width;height:Math.max(82*Theme.textScale,cardContent.implicitHeight+30)
-                        padding:16;leftPadding:lesson?22:20;hoverEnabled:true
+                        width:groupRows.width;height:Math.max(64*Theme.textScale,cardContent.implicitHeight+28)
+                        padding:14;leftPadding:16;rightPadding:16;hoverEnabled:true
                         Accessible.name:modelData.title+', '+modelData.meta+', '+modelData.extra+(modelData.unread?', unread':'')+(modelData.square?', '+modelData.resultLabel:'')
                         background:Rectangle {
-                            topLeftRadius:entry.modelData.first?32:0;topRightRadius:topLeftRadius
-                            bottomLeftRadius:entry.modelData.last?32:0;bottomRightRadius:bottomLeftRadius
+                            topLeftRadius:entry.modelData.first?24:0;topRightRadius:topLeftRadius
+                            bottomLeftRadius:entry.modelData.last?24:0;bottomRightRadius:bottomLeftRadius
                             color:Theme.alpha(Theme.text,card.down?.09:card.hovered?.045:0)
                             Behavior on color {ColorAnimation {duration:Theme.motion&&!card.down?120:0}}
                             border.width:card.visualFocus?2:0;border.color:Theme.text}
-                        contentItem:RowLayout {id:cardContent;spacing:16
+                        contentItem:RowLayout {id:cardContent;spacing:12
                             Label {textFormat:Text.PlainText;visible:card.lesson;text:card.modelData.meta.split(' · ')[0].replace(' – ','\n')
                                 Layout.preferredWidth:62*Theme.textScale;Layout.alignment:Qt.AlignTop;color:Theme.secondary;font.pixelSize:13*Theme.textScale;font.weight:Font.DemiBold}
                             Rectangle {visible:card.lesson;Layout.preferredWidth:4;Layout.fillHeight:true;radius:2;color:[Theme.red,Theme.blue,Theme.green][entry.modelData.rowIndex%3]}
-                            ColumnLayout {Layout.fillWidth:true;spacing:6
+                            ColumnLayout {Layout.fillWidth:true;spacing:4
                                 RowLayout {Layout.fillWidth:true
-                                    Label {textFormat:Text.PlainText;text:card.summary?'Weighted counting results':card.modelData.title;Layout.fillWidth:true;Layout.minimumWidth:0;wrapMode:Text.Wrap;color:card.summary?Theme.secondary:Theme.text;font.pixelSize:(card.summary?14:16)*Theme.textScale;font.weight:card.summary?Font.Medium:Font.DemiBold}
+                                    ColumnLayout {Layout.fillWidth:true;Layout.minimumWidth:0;spacing:2
+                                        Label {textFormat:Text.PlainText;text:card.summary?'Weighted counting results':card.modelData.title;Layout.fillWidth:true;wrapMode:Text.Wrap;color:card.summary?Theme.secondary:Theme.text;font.pixelSize:(card.summary?14:15)*Theme.textScale;font.weight:card.summary?Font.Medium:Font.DemiBold}
+                                        Label {textFormat:Text.PlainText;visible:!card.lesson&&!card.summary;text:card.modelData.meta;color:Theme.secondary;font.pixelSize:13*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
+                                    }
                                     ColumnLayout {visible:app.section===4;Layout.maximumWidth:cardContent.width*.4;spacing:3
                                         Rectangle {id:resultSquare;objectName:'gradeSquare';visible:!!card.modelData.square;Layout.alignment:Qt.AlignRight;implicitWidth:28;implicitHeight:28;radius:8;color:card.modelData.square||'transparent'
                                             border.width:1;border.color:Theme.alpha(Theme.text,.12)
                                             GlassToolTip {requested:resultSquare.visible&&(card.hovered||card.visualFocus);text:card.modelData.resultLabel||''}
                                         }
-                                        Label {objectName:'gradeScore';textFormat:Text.PlainText;visible:!card.modelData.square;text:card.summary?card.modelData.title:card.modelData.extra;Layout.fillWidth:true;wrapMode:Text.Wrap;horizontalAlignment:Text.AlignRight;color:card.scoreInk;font.pixelSize:(card.summary?30:18)*Theme.textScale;font.weight:Font.Bold}
+                                        Label {objectName:'gradeScore';textFormat:Text.PlainText;visible:!card.modelData.square;text:card.summary?card.modelData.title:card.modelData.extra;Layout.fillWidth:true;wrapMode:Text.Wrap;horizontalAlignment:Text.AlignRight;color:card.scoreInk;font.pixelSize:(card.summary?28:17)*Theme.textScale;font.weight:Font.Bold}
                                         Label {objectName:'gradePercent';textFormat:Text.PlainText;visible:!!card.modelData.percentText;text:card.modelData.percentText||'';Layout.fillWidth:true;horizontalAlignment:Text.AlignRight;color:Theme.secondary;font.pixelSize:13*Theme.textScale}
                                     }
                                 }
                                 Label {textFormat:Text.PlainText;visible:card.lesson&&card.modelData.extra!==''&&!(card.modelData.assignments||[]).length;text:card.modelData.extra;color:Theme.text;font.pixelSize:14*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                                Label {textFormat:Text.PlainText;visible:!card.summary;text:card.lesson?card.modelData.meta.split(' · ').slice(1).join(' · '):card.modelData.meta;color:Theme.secondary;font.pixelSize:13*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
+                                Label {textFormat:Text.PlainText;visible:card.lesson;text:card.lesson?card.modelData.meta.split(' · ').slice(1).join(' · '):card.modelData.meta;color:Theme.secondary;font.pixelSize:13*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
                                 Repeater {model:card.lesson?(card.modelData.assignments||[]):[]
-                                    SelectorLens {id:assignment;objectName:'lessonAssignment';required property var modelData;Layout.fillWidth:true;implicitHeight:assignmentRow.implicitHeight+20;radius:16;backdrop:app.sceneBackdrop;tracking:view.contentY
-                                        RowLayout {id:assignmentRow;anchors.fill:parent;anchors.margins:10;spacing:8
-                                            TaskCheck {id:lessonCheck;objectName:'lesson-done-'+assignment.modelData.id;Layout.alignment:Qt.AlignTop;enabled:assignment.modelData.editable;checked:tasks.completedIds.indexOf(assignment.modelData.id)>=0;Accessible.name:(checked?'Restore ':'Complete ')+assignment.modelData.title
+                                    SelectorLens {id:assignment;objectName:'lessonAssignment';required property var modelData;Layout.fillWidth:true;implicitHeight:assignmentRow.implicitHeight+16;radius:12;backdrop:app.sceneBackdrop;tracking:view.contentY
+                                        RowLayout {id:assignmentRow;anchors.fill:parent;anchors.margins:8;spacing:8
+                                            TaskCheck {id:lessonCheck;markSize:20;implicitWidth:24;implicitHeight:24;objectName:'lesson-done-'+assignment.modelData.id;Layout.alignment:Qt.AlignTop;enabled:assignment.modelData.editable;checked:tasks.completedIds.indexOf(assignment.modelData.id)>=0;Accessible.name:(checked?'Restore ':'Complete ')+assignment.modelData.title
                                                 onClicked:{let id=assignment.modelData.id,done=checked,host=app;if(tasks.change(id,'done',done))host.notify(done?'Task completed':'Task restored');else checked=Qt.binding(function(){return tasks.completedIds.indexOf(assignment.modelData.id)>=0})}
                                             }
                                             ColumnLayout {Layout.fillWidth:true;spacing:4

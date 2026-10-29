@@ -143,7 +143,7 @@ ApplicationWindow {
             background:Surface{radius:22;border.color:search.activeFocus?Theme.blue:Theme.rim}
             Keys.onEscapePressed:{app.searchOpen=false;app.searchText=''}
         }
-        Item {Layout.fillWidth:true;Layout.fillHeight:true
+        Item {objectName:'pageViewport';clip:true;Layout.fillWidth:true;Layout.fillHeight:true
         PlannerView {id:planner;app:app;anchors.fill:parent;visible:app.section<2
             onFocusTask:(id,title,done)=>{focusView.taskId=id;focusView.taskTitle=title;focusView.completed=done;app.focusOpen=true}
             onEditNote:(id,title,note)=>app.showTask(id,title,note)

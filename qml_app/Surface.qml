@@ -8,7 +8,7 @@ Rectangle {
     property bool continuous: false
     property real tracking: 0
     property real refraction: 28
-    radius: 32
+    radius: 24
     color: Theme.highContrast ? Theme.elevated : backdrop ? 'transparent' : Theme.surface
     border.color: Theme.rim; border.width: Theme.highContrast ? 1.5 : backdrop ? 0 : 1
     Rectangle { visible: panel.sheen && !panel.backdrop; anchors.fill: parent; anchors.margins: 1; radius: Math.max(0,panel.radius - 1)

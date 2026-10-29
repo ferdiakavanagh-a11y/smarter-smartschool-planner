@@ -111,8 +111,8 @@ ColumnLayout {
         }
         section.property:'group';section.criteria:ViewSection.FullString
         // Qt updates the section context when reusing headings; a required property can retain its old value.
-        section.delegate:Item {x:16;width:list.width-32;height:56*Theme.textScale
-            Label {textFormat:Text.PlainText;anchors.left:parent.left;anchors.bottom:parent.bottom;anchors.bottomMargin:10;text:section;font.pixelSize:24*Theme.textScale;font.bold:true;color:Theme.text}
+        section.delegate:Item {x:16;width:list.width-32;height:64*Theme.textScale
+            Label {textFormat:Text.PlainText;anchors.left:parent.left;anchors.bottom:parent.bottom;anchors.bottomMargin:10;text:section;font.pixelSize:22*Theme.textScale;font.bold:true;color:Theme.text}
             Label {textFormat:Text.PlainText;anchors.right:parent.right;anchors.rightMargin:8;anchors.bottom:parent.bottom;anchors.bottomMargin:13;text:tasks.groupCounts[section]||0;font.pixelSize:13*Theme.textScale;font.weight:Font.DemiBold;color:Theme.secondary}}
         delegate:Item {
             id:taskRow;objectName:'taskDelegate'
@@ -140,7 +140,7 @@ ColumnLayout {
                 if(saved){if(feedback)completionExit.start();host.notify(target?'Task completed':'Task restored')}
                 else{if(finishing)planner.finishFeedback();finishing=false;check.checked=Qt.binding(function(){return taskRow.finishing||taskRow.done})}
             }
-            width:list.width-32;height:Math.max(110*Theme.textScale,row.implicitHeight+30);opacity:finishing?1:done?.55:1
+            width:list.width-32;height:Math.max(76*Theme.textScale,row.implicitHeight+28);opacity:finishing?1:done?.55:1
             ListView.onPooled:{pooled=true;if(finishing){if(index>=0)planner.keepCompletionTop=false;completionExit.stop();planner.finishFeedback();finishing=false}}
             ListView.onReused:{completionExit.stop();if(finishing)planner.finishFeedback();finishing=false;opacity=Qt.binding(function(){return taskRow.finishing?1:taskRow.done?.55:1});pooled=false}
             Component.onDestruction:if(finishing)planner.finishFeedback()
@@ -157,8 +157,8 @@ ColumnLayout {
                     height:taskRow.height+(taskRow.first?0:52)+(taskRow.last?0:52)}
             }
             Rectangle {x:4;y:taskRow.first?4:0;width:parent.width-8;height:parent.height-(taskRow.first?4:0)-(taskRow.last?4:0)
-                topLeftRadius:taskRow.first?28:0;topRightRadius:topLeftRadius
-                bottomLeftRadius:taskRow.last?28:0;bottomRightRadius:bottomLeftRadius
+                topLeftRadius:taskRow.first?24:0;topRightRadius:topLeftRadius
+                bottomLeftRadius:taskRow.last?24:0;bottomRightRadius:bottomLeftRadius
                 color:Theme.fill;opacity:hover.hovered||(taskRow.ListView.isCurrentItem&&list.activeFocus)?.5:0;Behavior on opacity{NumberAnimation{duration:Theme.motion?150:0}}}
             HoverHandler{id:hover}
             RowLayout {
@@ -169,7 +169,7 @@ ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth:true;spacing:3
                     RowLayout {Layout.fillWidth:true
-                        Label {textFormat:Text.PlainText;text:taskRow.course;color:Theme.text;font.pixelSize:15*Theme.textScale;font.weight:Font.Bold;elide:Text.ElideRight;Layout.minimumWidth:0;Layout.maximumWidth:row.width*.35}
+                        Label {textFormat:Text.PlainText;text:taskRow.course;color:Theme.text;font.pixelSize:15*Theme.textScale;font.weight:Font.DemiBold;elide:Text.ElideRight;Layout.minimumWidth:0;Layout.maximumWidth:row.width*.35}
                         Rectangle {color:Theme.dark?Theme.alpha(Theme.badge,.55):Theme.alpha(Theme.typeColor(taskRow.kind),.2);radius:12;implicitWidth:Math.min(badge.implicitWidth+16,row.width*.24);implicitHeight:badge.implicitHeight+6
                             Label {textFormat:Text.PlainText;id:badge;anchors.centerIn:parent;width:parent.width-16;text:taskRow.kind;elide:Text.ElideRight;color:Theme.badgeInk(taskRow.kind);font.pixelSize:10*Theme.textScale;font.bold:true}
                             HoverHandler {id:badgeHover}
@@ -186,14 +186,14 @@ ColumnLayout {
                         }
                         Item {Layout.fillWidth:true}
                     }
-                    Label {textFormat:Text.PlainText;text:taskRow.title;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;font.pixelSize:15*Theme.textScale;font.weight:Font.Medium;font.strikeout:taskRow.done;color:Theme.text}
+                    Label {textFormat:Text.PlainText;text:taskRow.title;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;font.pixelSize:15*Theme.textScale;font.weight:Font.Normal;font.strikeout:taskRow.done;color:Theme.text}
                     Label {textFormat:Text.PlainText;visible:taskRow.body!=='';text:taskRow.body;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;font.pixelSize:13*Theme.textScale;color:Theme.secondary}
                     Label {textFormat:Text.PlainText;text:Qt.formatDate(new Date(taskRow.due+'T12:00:00'),'ddd, d MMM')+'  ·  posted '+Qt.formatDate(new Date(taskRow.posted+'T12:00:00'),'ddd d MMM');Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.tertiary;font.pixelSize:12*Theme.textScale}
                     Label {textFormat:Text.PlainText;visible:taskRow.note!=='';text:taskRow.note;Layout.fillWidth:true;elide:Text.ElideRight;color:Theme.orange;font.italic:true;font.pixelSize:13*Theme.textScale}
                     TapHandler {onTapped:planner.editNote(taskRow.taskId,taskRow.title,taskRow.note)}
                 }
-                Capsule {text:taskRow.pinned?'Unpin':'Pin';symbol:'pin';iconOnly:true;quiet:true;opacity:hover.hovered||taskRow.pinned||activeFocus?1:0;onClicked:{let host=planner.app;if(tasks.change(taskRow.taskId,'pinned',!taskRow.pinned))host.notify('Pin updated')}}
-                Capsule {visible:!app.production||backend.canFocus(taskRow.taskId);objectName:'focus-'+taskRow.taskId;text:'Focus';symbol:'focus';iconOnly:true;quiet:true;opacity:hover.hovered||activeFocus?1:0;onClicked:planner.focusTask(taskRow.taskId,taskRow.title,taskRow.done)}
+                Capsule {Layout.preferredWidth:30;Layout.preferredHeight:30;text:taskRow.pinned?'Unpin':'Pin';symbol:'pin';iconOnly:true;quiet:true;opacity:hover.hovered||taskRow.pinned||activeFocus?1:0;onClicked:{let host=planner.app;if(tasks.change(taskRow.taskId,'pinned',!taskRow.pinned))host.notify('Pin updated')}}
+                Capsule {Layout.preferredWidth:30;Layout.preferredHeight:30;visible:!app.production||backend.canFocus(taskRow.taskId);objectName:'focus-'+taskRow.taskId;text:'Focus';symbol:'focus';iconOnly:true;quiet:true;opacity:hover.hovered||activeFocus?1:0;onClicked:planner.focusTask(taskRow.taskId,taskRow.title,taskRow.done)}
             }
             Rectangle {visible:!taskRow.last;x:58;width:parent.width-74;height:1;anchors.bottom:parent.bottom;color:Theme.separator}
         }
