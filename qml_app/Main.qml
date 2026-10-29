@@ -45,7 +45,7 @@ ApplicationWindow {
     QtObject {id:themeProxy;property bool fancy:Theme.fancy;property bool reducedMotion:Theme.reducedMotion;property real textScale:Theme.textScale
         onFancyChanged:Theme.fancy=fancy;onReducedMotionChanged:Theme.reducedMotion=reducedMotion;onTextScaleChanged:Theme.textScale=textScale}
     Component.onCompleted:{Theme.fancy=initialFancy;Theme.matched=typeof initialMatched!=='undefined'&&initialMatched;if(benchmarkEnabled||Theme.matched)Theme.scheme='light';if(Theme.matched)Theme.animatedBackground=false
-        if(production){let p=backend.settings;Theme.fancy=p.renderingMode!=='performance';Theme.style=p.style||'clear';Theme.scheme=p.scheme||'light';Theme.glassLevel=p.glassLevel===undefined?0:p.glassLevel;Theme.refractionLevel=p.distortion===undefined?.5:p.distortion;Theme.textScale=p.textSize||1;Theme.wallpaperIndex=p.wallpaperIndex===undefined?1:p.wallpaperIndex;Theme.reducedMotion=!!p.reducedMotion;Theme.animatedBackground=p.animatedBackground!==false;Theme.highContrast=!!p.highContrast}
+        if(production){let p=backend.settings;Theme.fancy=p.renderingMode!=='performance';Theme.style=p.style||'clear';Theme.scheme=p.scheme||'light';Theme.glassLevel=p.glassLevel===undefined?0:p.glassLevel;Theme.refractionLevel=p.distortion===undefined?.25:p.distortion;Theme.textScale=p.textSize||1;Theme.wallpaperIndex=p.wallpaperIndex===undefined?1:p.wallpaperIndex;Theme.reducedMotion=!!p.reducedMotion;Theme.animatedBackground=p.animatedBackground!==false;Theme.highContrast=!!p.highContrast}
         preferencesReady=true
         if(production&&backend.renderingChoicePending)Qt.callLater(settings.open)
     }
@@ -56,7 +56,7 @@ ApplicationWindow {
         function onWallpaperIndexChanged(){preferenceSave.restart()} function onReducedMotionChanged(){preferenceSave.restart()} function onAnimatedBackgroundChanged(){preferenceSave.restart()} function onHighContrastChanged(){preferenceSave.restart()}
     }
     Connections {target:app.production?backend:null
-        function onChanged(){app.fixtureRevision++;app.busy=backend.busy}
+        function onChanged(){app.fixtureRevision++;app.busy=backend.busy;Qt.callLater(app.showNotice)}
         function onError(message){app.errorText=message;errorSheet.open()}
         function onDetailReady(token,info){if(details.visible&&token===app.detailToken){app.sectionInfo=info;detailsText.text=info.body}}
         function onQuitRequested(){app.close()}
@@ -66,6 +66,7 @@ ApplicationWindow {
     Binding {target:Theme;property:'backdrop';value:backdrop}
     font.family:'Segoe UI Variable';font.pixelSize:14*Theme.textScale
     palette.text:Theme.text;palette.windowText:Theme.text;palette.buttonText:Theme.text;palette.highlight:Theme.blue;palette.base:Theme.elevated;palette.button:Theme.surface;palette.window:Theme.bg
+    function showNotice(){if(!production)return;if(backend.notice.text){if(!noticeSheet.opened)noticeSheet.open()}else noticeSheet.close()}
     function searchFocus(){search.forceActiveFocus()}
     function controlPosition(item){
         // Reading ancestor geometry keeps the binding current through layout and tab motion.
@@ -98,8 +99,8 @@ ApplicationWindow {
         MouseArea {anchors.fill:parent;onPressed:app.startSystemMove();onDoubleClicked:app.visibility===Window.Maximized?app.showNormal():app.showMaximized()}
         Row {anchors.right:parent.right;anchors.rightMargin:14;anchors.verticalCenter:parent.verticalCenter;spacing:8
             Repeater {model:[{name:'Minimize',color:'#ffbd2e',symbol:'−'},{name:'Maximize',color:'#28c840',symbol:'+'},{name:'Close',color:'#ff5f57',symbol:'×'}]
-                Button {id:windowControl;required property var modelData;required property int index;width:20;height:20;Accessible.name:modelData.name
-                    background:Item { Rectangle { objectName:'windowDot'; anchors.centerIn:parent;width:10;height:10;radius:5;color:windowControl.modelData.color;border.width:windowControl.visualFocus?2:0;border.color:Theme.text } }
+                Button {id:windowControl;required property var modelData;required property int index;width:24;height:24;Accessible.name:modelData.name
+                    background:Item { Rectangle { objectName:'windowDot'; anchors.centerIn:parent;width:13;height:13;radius:6.5;color:windowControl.modelData.color;border.width:windowControl.visualFocus?2:0;border.color:Theme.text } }
                     contentItem:Text {textFormat:Text.PlainText;text:parent.hovered?parent.modelData.symbol:'';color:'#242424';horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
                     onClicked:index===0?app.showMinimized():index===1?(app.visibility===Window.Maximized?app.showNormal():app.showMaximized()):app.close()
                 }
@@ -136,14 +137,7 @@ ApplicationWindow {
                 }
             }
         }
-        ColumnLayout {Layout.fillWidth:true;visible:app.production&&(backend.warnings!==''||backend.notice.text!==undefined)
-            Label {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.orange;text:app.production?backend.warnings:''}
-            Label {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;text:app.production?(backend.notice.text||''):''}
-            RowLayout {visible:app.production&&backend.notice.text!==undefined
-                Capsule {text:'Install update';visible:app.production&&backend.notice.kind==='update';enabled:!app.busy;onClicked:if(app.flushEdits())backend.installUpdate()}
-                Capsule {text:'Dismiss';onClicked:backend.dismissNotice()}
-            }
-        }
+        Label {visible:app.production&&backend.warnings!=='';textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.orange;text:app.production?backend.warnings:''}
         TextField {id:search;objectName:'search';Layout.fillWidth:true;visible:app.searchOpen;implicitHeight:44;text:app.searchText;onTextChanged:app.searchText=text
             placeholderText:['Search tasks…','Search missed tasks…','Search schedule…','Search all classes…','Search grades…','Search LVS…'][app.section];Accessible.name:'Search current tab';color:Theme.text;placeholderTextColor:Theme.secondary;leftPadding:18;selectByMouse:true
             background:Surface{radius:22;border.color:search.activeFocus?Theme.blue:Theme.rim}
@@ -161,7 +155,7 @@ ApplicationWindow {
     }
     // One bounded capture for the floating controls; those controls live outside its source.
     ShaderEffectSource {id:topSource;objectName:'topControlSource';visible:false
-        width:app.width;height:Math.min(app.height,(app.headerCollapsed?112:220)*Theme.textScale+(planner.typeMenuVisible?240:0))
+        width:app.width;height:Math.min(app.height,(app.headerCollapsed?112:220)*Theme.textScale+(planner.typeMenuVisible||sectionPages.courseMenuVisible?240:0))
         sourceItem:app.renderActive&&!app.focusOpen&&!Theme.highContrast?plannerScene:null
         sourceRect:Qt.rect(0,0,width,height);textureSize:Qt.size(Math.ceil(width*(Theme.fancy?1:.65)),Math.ceil(height*(Theme.fancy?1:.65)))
         hideSource:false;live:app.renderActive&&!app.focusOpen;mipmap:true;smooth:true
@@ -223,9 +217,15 @@ ApplicationWindow {
     }
     onBusyChanged:if(busy)Qt.callLater(syncSource.scheduleUpdate)
     SyncProgress {app:app;backdrop:syncSource;action:app.production?backend.busyAction:'sync'}
+    Sheet {id:noticeSheet;objectName:'noticeSheet';title:!app.production?'':backend.notice.kind==='release'?"What's new":backend.notice.kind==='update'?'Update available':'Update status'
+        beforeClose:function(){if(app.production)backend.dismissNotice();return true}
+        Label {objectName:'releaseNotesText';textFormat:Text.MarkdownText;text:app.production?(backend.notice.text||''):'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:14*Theme.textScale;onLinkActivated:link=>backend.openExternal(link)}
+        Capsule {text:'Install update';visible:app.production&&backend.notice.kind==='update';enabled:!app.busy;onClicked:if(app.flushEdits())backend.installUpdate()}
+        Capsule {text:'Dismiss';onClicked:noticeSheet.dismiss()}
+    }
     Sheet {id:errorSheet;objectName:'errorSheet';title:'Could not complete the action';Label {textFormat:Text.PlainText;text:app.errorText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text} Capsule {text:'Retry sync';enabled:!app.busy;onClicked:{errorSheet.close();app.syncNow()}} Capsule {text:'Change login details';onClicked:app.changeAccount()}}
-    Shortcut{sequence:'Ctrl+F';enabled:!app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
-    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible;onActivated:app.focusOpen=false}
+    Shortcut{sequence:'Ctrl+F';enabled:!app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
+    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible;onActivated:app.focusOpen=false}
     Repeater{model:[Qt.TopEdge,Qt.BottomEdge,Qt.LeftEdge,Qt.RightEdge,Qt.TopEdge|Qt.LeftEdge,Qt.TopEdge|Qt.RightEdge,Qt.BottomEdge|Qt.LeftEdge,Qt.BottomEdge|Qt.RightEdge]
         MouseArea{required property int modelData;visible:app.visibility!==Window.Maximized;z:20
             width:(modelData&Qt.LeftEdge)||(modelData&Qt.RightEdge)?6:app.width-12

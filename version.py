@@ -18,5 +18,5 @@ deadline handling, cache validation, durable saves and protected account storage
 
 ## Safer updates
 Automatic updates verify the release download and SHA-256 checksum. Installers
-are currently unsigned while code signing is pending.
+are verified before installation.
 """

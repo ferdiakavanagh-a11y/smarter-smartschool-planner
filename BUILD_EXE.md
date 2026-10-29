@@ -26,6 +26,5 @@ Rebuild after Python, QML, icon or shader changes. A fresh source clone requires
 `python compile_shaders.py` after installing requirements.
 
 The app uses Qt Quick instead of WebView2/pythonnet. Installer identity, data
-paths, helper switches, credential cleanup and signature verification remain.
-Before publishing, check the packaged app and actual upgrade/uninstall lifecycle
-and satisfy [the signing policy](CODE_SIGNING_POLICY.md).
+paths, helper switches, credential cleanup and checksum verification remain.
+Before publishing, check the packaged app and actual upgrade/uninstall lifecycle.

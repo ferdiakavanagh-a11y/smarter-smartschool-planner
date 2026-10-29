@@ -56,13 +56,13 @@ def row(key, title, meta='', body='', extra='', **values):
     return dict(id=str(key), title=text(title), meta=text(meta), body=text(body), extra=text(extra), links=[], assignments=[], **values)
 
 
-def groups(backend, section, query):
+def groups(backend, section, query, course='All subjects'):
     data, query = backend.data, query.casefold().strip()
     matches = lambda item: not query or query in ' '.join(str(item.get(k) or '') for k in ('title', 'meta', 'body', 'extra')).casefold()
     output = []
     if section in (2, 3):
         tasks = {task['taskId']: task for task in backend.tasks.all}
-        for day in data.get('days' if section == 2 else 'all_classes', []):
+        for day in sorted(data.get('days' if section == 2 else 'all_classes', []), key=lambda day: str(day.get('date') or '')):
             items = []
             for event in day.get('events', []):
                 info = event.get('info') or {}
@@ -90,10 +90,12 @@ def groups(backend, section, query):
                 if matches(item):
                     items.append(item)
             if items or not query:
-                output.append(dict(heading=written_date(day.get('date'), full=True), items=items or [row('', 'No lessons scheduled', kind='empty')]))
+                output.append(dict(date=str(day.get('date') or '')[:10], heading=written_date(day.get('date'), full=True), items=items or [row('', 'No lessons scheduled', kind='empty')]))
     elif section == 4:
         by_course = defaultdict(list)
         for result in data.get('results', []):
+            if course != 'All subjects' and text(result.get('course')) != course:
+                continue
             score, maximum = result.get('score'), result.get('max')
             presentation, numeric = grade_presentation(result)
             body = fields_text([(k, result.get(v)) for k, v in [('Course', 'course'), ('Date', 'date'), ('Teacher', 'teacher'), ('Period', 'period')]])+'\n\n'+presentation['extra']+'\n\n'+'\n\n'.join(text(v) for v in result.get('feedback') or [])

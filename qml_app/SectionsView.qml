@@ -6,11 +6,22 @@ ListView {
     required property var app
     property var readNotes: ({})
     property bool topResetPending:false
+    property string gradeCourse:'All subjects'
+    readonly property bool courseMenuVisible:headerItem?headerItem.courseMenuVisible:false
     function resetTop(){
         if(!visible||app.section<2||height<=0)return
         scrollMotion.stop();cancelFlick()
         if(headerItem)headerItem.forceLayout()
         forceLayout();positionViewAtBeginning();app.headerCollapsed=false
+        if(app.production&&(app.section===2||app.section===3)&&!app.searchText.trim()){
+            let today=Qt.formatDate(new Date(),'yyyy-MM-dd'),target=-1,lastDay=-1
+            for(let i=0;i<model.length;i++)if(model[i].date&&(i===0||model[i].date!==model[i-1].date)){
+                lastDay=i
+                if(model[i].date>=today){target=i;break}
+            }
+            if(target<0)target=lastDay
+            if(target>=0)positionViewAtIndex(target,ListView.Beginning)
+        }
     }
     function requestTop(){topResetPending=true;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
     onVisibleChanged:if(visible&&app.section>=2)requestTop()
@@ -18,7 +29,7 @@ ListView {
     function flatten(groups){
         let rows=[]
         for(let group of groups)for(let i=0;i<group.items.length;i++)
-            rows.push({heading:i===0?group.heading:'',average:i===0?group.average||'':'',items:[group.items[i]],first:i===0,last:i===group.items.length-1,rowIndex:i})
+            rows.push({date:group.date||'',heading:i===0?group.heading:'',average:i===0?group.average||'':'',items:[group.items[i]],first:i===0,last:i===group.items.length-1,rowIndex:i})
         return rows
     }
     signal detail(string title,string body)
@@ -27,7 +38,7 @@ ListView {
     displayMarginBeginning:220*Theme.textScale
     model: {
         let revision=app.fixtureRevision
-        if(app.production)return flatten(backend.groups(app.section,app.searchText))
+        if(app.production)return flatten(backend.groups(app.section,app.searchText,app.section===4?gradeCourse:'All subjects'))
         if(app.datasetIndex===0)return []
         let rows=[]
         let courses=['Mathematics','Nederlands','Sciences','History','Français','日本語 & cultuur']
@@ -57,12 +68,23 @@ ListView {
     Connections {target:app
         function onSectionChanged(){if(app.section>=2)view.requestTop()}
         function onSearchTextChanged(){if(view.visible)view.requestTop()}
-        function onFixtureRevisionChanged(){view.readNotes={}}
+        function onFixtureRevisionChanged(){view.readNotes={};if(app.production&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects';if(view.visible&&(app.section===2||app.section===3))view.requestTop()}
         function onFrameSwapped(){if(view.topResetPending&&view.visible&&view.height>0){view.resetTop();view.topResetPending=false}}
     }
     onContentYChanged:if(view.visible&&!topResetPending)app.headerCollapsed=contentY-originY>80&&!app.searchOpen
     header:Column {
+        readonly property bool courseMenuVisible:gradePicker.popup.visible
         x:16;width:view.width-32;spacing:10
+        Item {id:gradeSlot;visible:app.section===4&&app.production;width:parent.width;height:visible?48:0
+            GlassComboBox {id:gradePicker;objectName:'gradeCourseFilter';parent:app.controlsLayer
+                readonly property point origin:app.controlPosition(gradeSlot)
+                x:origin.x;y:origin.y;visible:gradeSlot.visible&&view.visible&&!app.focusOpen
+                width:Math.min(gradeSlot.width,Math.max(160,implicitContentWidth+46)*Theme.textScale);height:40
+                selectorMaterial:true;backdrop:app.controlsBackdrop
+                model:app.production?backend.gradeCourses:[];currentIndex:Math.max(0,model.indexOf(view.gradeCourse));Accessible.name:'Filter grades by subject'
+                onActivated:{view.gradeCourse=currentText;view.requestTop()}
+            }
+        }
         Label {textFormat:Text.PlainText;visible:app.section===5;text:app.production?'This school year':'This school year · Synthetic workspace';color:Theme.secondary;padding:8}
         Capsule {objectName:'markAllRead';visible:app.section===5;text:'Mark all as read';onClicked:{if(app.production){backend.markRead('*');return}let next={};for(let i=0;i<8;i++)next['lvs-'+i]=true;view.readNotes=next}}
     }

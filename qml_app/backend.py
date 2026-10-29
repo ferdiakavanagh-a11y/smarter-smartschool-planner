@@ -135,7 +135,7 @@ class Backend(QObject):
         for key, options in dict(renderingMode=('fancy', 'performance'), style=('clear', 'vivid'), scheme=('light', 'dark', 'auto')).items():
             if values.get(key) not in options:
                 values[key] = options[0]
-        for key, (low, high, default) in dict(glassLevel=(0, 1, 0), distortion=(0, 1, .5), textSize=(.9, 1.35, 1), wallpaperIndex=(0, 3, 1)).items():
+        for key, (low, high, default) in dict(glassLevel=(0, 1, 0), distortion=(0, 1, .25), textSize=(.9, 1.35, 1), wallpaperIndex=(0, 3, 1)).items():
             value = values.get(key)
             if type(value) not in (int, float) or not low <= value <= high or not math.isfinite(value):
                 values[key] = default
@@ -372,10 +372,15 @@ class Backend(QObject):
         item = next((t for t in self.data.get('todos', []) if str(t.get('id')) == task_id), {})
         return bool(item) and not re.search(r'\b(meenemen|meebrengen|meebreng|herinnering|herinneringen|reminder|reminders|materiaal|materialen)\b|^ME$', str(item.get('type') or '').strip(), re.I)
 
+    @Property('QStringList', notify=changed)
+    def gradeCourses(self):
+        return ['All subjects'] + sorted({text(r.get('course')) for r in self.data.get('results', []) if text(r.get('course'))})
+
     @Slot(int, str, result='QVariantList')
-    def groups(self, section, query):
+    @Slot(int, str, str, result='QVariantList')
+    def groups(self, section, query, course='All subjects'):
         from .sections import groups
-        return groups(self, section, query)
+        return groups(self, section, query, course)
 
     @Slot(str)
     def openNote(self, note_id):

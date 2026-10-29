@@ -11,7 +11,7 @@ QtObject {
     property bool highContrast: false
     property bool active: true
     property real glassLevel: 0
-    property real refractionLevel: .5
+    property real refractionLevel: .25
     property int wallpaperIndex: 1
     property real textScale: 1
     readonly property bool dark: scheme === "dark" || (scheme === "auto" && Application.styleHints.colorScheme === Qt.Dark)

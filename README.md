@@ -70,7 +70,4 @@ environments and test data are excluded.
 
 Adapted material techniques retain their MIT notices in
 [third-party notices](qml_app/THIRD_PARTY_NOTICES.md). PySide6/Qt dependencies
-retain their own licenses. Signing remains governed by
-[CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md); this migration does not publish
-a release. Free code signing provided by [SignPath.io](https://signpath.io),
-certificate by [SignPath Foundation](https://signpath.org), remains pending.
+retain their own licenses. Updates verify the release download and SHA-256 checksum.

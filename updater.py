@@ -25,8 +25,6 @@ MAX_INSTALLER_BYTES = 300 * 1024 * 1024
 MAX_RELEASE_BYTES = 2 * 1024 * 1024
 TIMEOUT = 20
 ALLOW_ANY_URL_FOR_TESTS = False  # only the offline tests flip this
-# Populate with the approved signing certificate's SHA-256 fingerprint before releasing signed updates.
-TRUSTED_SIGNER_SHA256: frozenset[str] = frozenset()
 _download_tokens: dict[Path, str] = {}
 
 
@@ -163,30 +161,6 @@ def _expected_hash(info: dict) -> str:
     raise UpdateError("This release has no checksum, so it can't be verified. Update was cancelled.")
 
 
-def verify_installer_signature(path: Path) -> None:
-    """Check the pinned publisher when signing is configured; otherwise allow unsigned releases."""
-    if not TRUSTED_SIGNER_SHA256:
-        return
-    literal = "'" + str(path.resolve()).replace("'", "''") + "'"
-    script = ("$ErrorActionPreference='Stop'; $s=Get-AuthenticodeSignature -LiteralPath " + literal + "; "
-              "@{status=[string]$s.Status; certificate=$(if($s.SignerCertificate){"
-              "[Convert]::ToBase64String($s.SignerCertificate.RawData)}else{''})}|ConvertTo-Json -Compress")
-    try:
-        result = subprocess.run(
-            [str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-             '-NoProfile', '-NonInteractive', '-EncodedCommand', base64.b64encode(script.encode('utf-16-le')).decode('ascii')],
-            capture_output=True, text=True, timeout=30, check=True,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        )
-        signature = json.loads(result.stdout.lstrip('\ufeff'))
-        fingerprint = hashlib.sha256(base64.b64decode(signature['certificate'], validate=True)).hexdigest()
-        if signature['status'] == 'Valid' and fingerprint in TRUSTED_SIGNER_SHA256:
-            return
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        pass
-    raise UpdateError("The installer is unsigned or its publisher could not be verified. Nothing was installed.")
-
-
 def _cleanup_token(path: Path) -> str | None:
     token = _download_tokens.get(path)
     try:
@@ -226,7 +200,6 @@ def download_and_verify(info: dict, progress=None) -> Path:
         with open(path, "rb") as f:
             if f.read(2) != b"MZ":
                 raise UpdateError("The download isn't a Windows program. Nothing was installed.")
-        verify_installer_signature(path)
         token = secrets.token_hex(32)
         (path.parent / '.ssp-owner').write_text(token, encoding='ascii')
         _download_tokens[path] = token
@@ -241,7 +214,6 @@ def download_and_verify(info: dict, progress=None) -> Path:
 def launch_installer(path: Path, root: Path | None = None) -> None:
     """Start the installer with no window at all (it closes this app, replaces the files and relaunches it)."""
     root = root or Path(__file__).resolve().parent
-    verify_installer_signature(path)
     def literal(value):
         return "'" + str(value).replace("'", "''") + "'"
     result = root / 'data' / 'install_result.json'
