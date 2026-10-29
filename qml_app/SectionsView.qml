@@ -36,7 +36,8 @@ ListView {
     }
     signal detail(string title,string body)
     Layout.leftMargin:-16;Layout.rightMargin:-16
-    clip:false;spacing:0;topMargin:(app.section===2||app.section===3)&&!app.searchText.trim()?height/2:0;bottomMargin:Math.max(120*Theme.textScale,topMargin);reuseItems:true;cacheBuffer:180
+    clip:false;spacing:0;topMargin:0;bottomMargin:Math.max(120*Theme.textScale,(app.section===2||app.section===3)&&!app.searchText.trim()?height/2:0);reuseItems:true;cacheBuffer:180
+    boundsBehavior:Flickable.StopAtBounds
     displayMarginBeginning:220*Theme.textScale
     model: {
         let revision=app.fixtureRevision

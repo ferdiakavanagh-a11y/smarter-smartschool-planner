@@ -66,7 +66,7 @@ ColumnLayout {
         }
         function resetTop(){planner.centeredEntry=false;scrollMotion.stop();forceLayout();positionViewAtBeginning()}
         Layout.fillWidth:true;Layout.fillHeight:true;Layout.leftMargin:-16;Layout.rightMargin:-16
-        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:planner.centeredEntry?height/2:0;bottomMargin:Math.max(100*Theme.textScale,planner.centeredEntry?height/2:0)
+        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:Math.max(100*Theme.textScale,planner.centeredEntry?height/2:0)
         displayMarginBeginning:220*Theme.textScale
         Connections {target:app
             function onFrameSwapped(){
@@ -75,7 +75,7 @@ ColumnLayout {
                 if(++planner.entryFrames>=2){planner.entryPending=false;app.sceneReady=true}
             }
         }
-        boundsBehavior:Flickable.DragOverBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:'Tasks grouped by due date'
+        boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:'Tasks grouped by due date'
         ScrollBar.vertical:ScrollBar{}
         SmoothScroll { id:scrollMotion; objectName:'taskScrollMotion'; view:list }
         removeDisplaced:Transition {NumberAnimation {property:'y';duration:Theme.motion?260:0;easing.type:Easing.OutCubic}}
