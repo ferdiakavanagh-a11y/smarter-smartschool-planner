@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from smartschool import Smartschool
+from smartschool._common import bs4_html, parse_smsc_vars
 from windows_security import atomic_bytes, protect, unprotect
 
 
@@ -52,14 +53,33 @@ class SecureSmartschool(Smartschool):
     @property
     def authenticated_user(self):
         if self._authenticated_user is None:
-            self._parse_login_information(self.get('/'))
+            response = self.get('/')
+            self._parse_login_information(response)
         if self._authenticated_user is None:
-            raise ValueError('Could not retrieve authenticated user information')
+            from app_errors import SyncError
+            parsed = urlsplit(response.url)
+            page = parsed.path if parsed.path in ('/', '/login', '/2fa', '/account-verification') else 'other'
+            content = response.headers.get('Content-Type', '').split(';', 1)[0].lower()
+            content = content if content in ('text/html', 'application/json') else 'other'
+            raise SyncError('login', 'Could not verify the signed-in account',
+                            'Smartschool did not return account information the planner could read.',
+                            'Check your saved login details. If they are correct, Smartschool may have changed its login page. Copy sync diagnostics to investigate.',
+                            f'Account identity unavailable; HTTP {response.status_code}; page={page}; content={content}')
         return self._authenticated_user
 
     @authenticated_user.setter
     def authenticated_user(self, value):
         self._authenticated_user = value
+
+    def _parse_login_information(self, response):
+        # Current bootstrap scripts no longer necessarily use jQuery's extend.
+        for script in bs4_html(response).select('script:not([src])'):
+            values = parse_smsc_vars(script.get_text())
+            user = values.get('authenticatedUser') if isinstance(values, dict) else None
+            identity = user.get('id') if isinstance(user, dict) else None
+            if type(identity) in (str, int) and str(identity).strip():
+                self.authenticated_user = user
+                return
 
     def _initialize_session(self):
         self.headers['User-Agent'] = 'unofficial Smartschool API interface'
@@ -81,6 +101,8 @@ class SecureSmartschool(Smartschool):
         return parsed.scheme == 'https' and parsed.netloc.lower() == self.creds.main_url.lower()
 
     def rebuild_auth(self, prepared_request, response):
+        if urlsplit(prepared_request.url).scheme != 'https':
+            raise ValueError('Refused to follow an insecure session redirect')
         if prepared_request.body is not None and not self._approved_origin(prepared_request.url):
             raise ValueError('Refused to forward login data to an unapproved address')
         return super().rebuild_auth(prepared_request, response)

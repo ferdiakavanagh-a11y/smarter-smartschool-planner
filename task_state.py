@@ -114,6 +114,20 @@ def rendering_choice_pending(root: Path) -> bool:
     return (root / "data" / "rendering_choice_pending").exists()
 
 
+@state_write
+def save_appearance_settings(root: Path, values: dict) -> dict:
+    """Commit native preferences together, preserving unrelated settings and read state."""
+    allowed = {'renderingMode', 'style', 'scheme', 'glassLevel', 'distortion', 'textSize',
+               'wallpaperIndex', 'reducedMotion', 'animatedBackground', 'highContrast'}
+    if set(values) - allowed:
+        raise ValueError('Unknown appearance setting')
+    settings = load_settings(root, strict=True)
+    settings.update(values)
+    settings['qmlVersion'] = 1
+    _atomic_json(_settings_path(root), settings)
+    return settings
+
+
 # pins and notes (keyed by task id)
 
 def _pinned_path(root: Path) -> Path:
@@ -140,6 +154,8 @@ def set_task_pinned(root: Path, task_id: str, pinned: bool) -> list[str]:
 
 def load_notes(root: Path, *, strict: bool = False) -> dict[str, str]:
     data = _load_json(_notes_path(root), dict, strict)
+    if strict and any(not isinstance(value, str) for value in data.values()):
+        raise ValueError('Could not read task_notes.json. Existing data was kept.')
     return {str(k): str(v) for k, v in data.items()}
 
 

@@ -4,7 +4,7 @@ REM Builds SmartschoolPlanner.exe from desktop_app.py. Rerun after any .py chang
 cd /d "%~dp0"
 
 echo Installing locked runtime and build dependencies...
-python -m pip install --no-deps -r requirements-release.txt
+python -m pip install --only-binary=:all: --no-deps -r requirements-release.txt
 if errorlevel 1 (
     echo.
     echo ERROR: Could not install the locked release dependencies.
@@ -18,7 +18,10 @@ if errorlevel 1 exit /b 1
 echo.
 echo Building SmartschoolPlanner.exe ...
 
-REM assets\ holds icon.ico (exe icon) and the window-button SVGs, bundled into the exe.
+python compile_shaders.py
+if errorlevel 1 exit /b 1
+
+REM assets\ holds icon.ico (exe icon) and shared application artwork, bundled into the exe.
 REM An existing .spec can't take --icon/--add-data, so build from the command line (rewrites the .spec).
 set "ICON_FILE=assets\icon.ico"
 if not exist "%ICON_FILE%" if exist "icon.ico" set "ICON_FILE=icon.ico"
@@ -35,11 +38,15 @@ REM Always regenerate the spec: an old one may still request a one-file bundle.
         --hidden-import=yaml ^
         --hidden-import=pyotp ^
         --hidden-import=logprise ^
-        --hidden-import=clr ^
-        --hidden-import=clr_loader ^
-        --hidden-import=webview.platforms.edgechromium ^
-        --collect-all pythonnet ^
-        --collect-all webview ^
+        --add-data "qml_app/*.qml;qml_app" ^
+        --add-data "qml_app/qmldir;qml_app" ^
+        --add-data "qml_app/Icons.js;qml_app" ^
+        --add-data "qml_app/*.svg;qml_app" ^
+        --add-data "qml_app/shaders/*.qsb;qml_app/shaders" ^
+        --add-data "qml_app/THIRD_PARTY_NOTICES.md;qml_app" ^
+        --hidden-import=PySide6.QtQml ^
+        --hidden-import=PySide6.QtQuick ^
+        --hidden-import=PySide6.QtQuickControls2 ^
         --collect-all google.genai ^
         --collect-all google.auth ^
         --collect-all httpx ^

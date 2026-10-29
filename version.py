@@ -1,16 +1,20 @@
-"""keeps track of current version, bump when pushing a new release"""
+"""Shared application and installer release version."""
 
-__version__ = "2.1.2"
+__version__ = "3.0.0"
 
-# Prepared for the next release; the version/tag must be selected before publishing.
-RELEASE_NOTES = """## Reliability and data safety
-Improved deadline parsing, safer handling of incomplete school responses,
-and protection against conflicting saves. Saved sections show a warning when
-they are out of date; permission failures do not restore private cached data.
+RELEASE_NOTES = """## New native desktop interface
+The planner now uses Qt Quick with liquid glass controls, smooth navigation,
+an animated sync screen and four original backgrounds. New installations start
+with Clear Light and Soft colours; existing appearance preferences are kept.
 
-## Notes and accessibility
-Pending notes are saved before closing. Keyboard navigation, long text and
-browser dashboard account separation have been improved.
+## Planner improvements
+Browse tasks, missed work, schedules, classes, grades and LVS in one interface.
+Completed, pinning, notes and Undo preserve your reading position. Improved
+keyboard controls, text scaling, reduced motion and high contrast are available.
+
+## Reliability and data safety
+Fixed account identification after Smartschool's homepage changes. Improved
+deadline handling, cache validation, durable saves and protected account storage.
 
 ## Safer updates
 Automatic installation requires a trusted publisher signature. It remains

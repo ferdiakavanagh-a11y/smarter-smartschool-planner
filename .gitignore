@@ -16,3 +16,12 @@ __pycache__/
 tests/
 release_tests/
 tasks/
+
+# Native Qt development environments and generated shader/cache files
+.venv*/
+**/.venv*/
+**/artifacts/
+*.qsb
+*.qmlc
+*.jsc
+.codebase-memory/

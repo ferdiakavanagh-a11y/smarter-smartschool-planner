@@ -166,8 +166,9 @@ def explain(exc: BaseException, main_url: str = "") -> dict:
                     "message": f"Some required login details are empty: {text.split(':', 1)[-1].strip()}.",
                     "hint": "Open Change login details and fill them in.", "details": details}
         if isinstance(e, ValueError) and "authenticated user" in text:
-            return {"kind": "login", "title": "Login failed",
-                    "message": "Smartschool didn't accept the login.", "hint": LOGIN_HINT, "details": details}
+            return {"kind": "login", "title": "Could not verify the signed-in account",
+                    "message": "Smartschool did not return account information the planner could read.",
+                    "hint": "Check your saved login details. If they are correct, the Smartschool login response may have changed.", "details": details}
         if name in ("YAMLError", "ScannerError", "ParserError") or isinstance(e, FileNotFoundError):
             return {"kind": "config", "title": "Login details unreadable",
                     "message": "The saved login details file is missing or damaged.",
