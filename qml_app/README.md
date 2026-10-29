@@ -32,9 +32,6 @@ Background choices are Satin (indigo/pearl folds), Soft colours (the original
 colour fields), Tide (blue glass waves) and Dunes (warm pearl/mauve folds).
 Each has a light and dark appearance and uses the existing animation controls.
 
-## Research and attribution
+## Attribution
 
-The design notes are historical records of the isolated prototype. References to
-the removed HTML renderer describe earlier comparisons, not current entry points.
-See LIQUID_MENU_RESEARCH.md, LIQUID_SHADING_RESEARCH.md, BACKGROUND_RESEARCH.md and
-THIRD_PARTY_NOTICES.md. Preserve the adapted material code's MIT notices.
+See THIRD_PARTY_NOTICES.md and preserve the adapted material code's MIT notices.

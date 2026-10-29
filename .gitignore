@@ -25,3 +25,11 @@ tasks/
 *.qmlc
 *.jsc
 .codebase-memory/
+
+# Local development notes and diagnostics (not part of the app)
+/CHANGELOG.md
+/handoff.md
+/qml_app/BACKGROUND_RESEARCH.md
+/qml_app/LIQUID_MENU_RESEARCH.md
+/qml_app/LIQUID_SHADING_RESEARCH.md
+/qml_app/gpu_probe.ps1
