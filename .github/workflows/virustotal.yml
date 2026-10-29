@@ -42,12 +42,12 @@ jobs:
 
       - name: Submit installer without executing it
         env:
-          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUS_TOTAL_API_KEY }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "$VIRUSTOTAL_API_KEY" ]] || { echo 'Add the VIRUSTOTAL_API_KEY repository secret first'; exit 1; }
+          [[ -n "$VIRUSTOTAL_API_KEY" ]] || { echo 'Add the VIRUS_TOTAL_API_KEY repository secret first'; exit 1; }
           curl --fail --silent --show-error --max-time 60 \
             --header "x-apikey: $VIRUSTOTAL_API_KEY" \
             'https://www.virustotal.com/api/v3/files/upload_url' --output upload.json
