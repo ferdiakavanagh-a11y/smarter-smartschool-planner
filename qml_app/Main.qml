@@ -137,7 +137,7 @@ ApplicationWindow {
                 }
             }
         }
-        Label {visible:app.production&&backend.warnings!=='';textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.orange;text:app.production?backend.warnings:''}
+        Capsule {objectName:'warningsButton';visible:app.production&&backend.warnings!=='';Layout.alignment:Qt.AlignLeft;text:'Sync warnings';symbol:'warn';onClicked:warningsSheet.open()}
         TextField {id:search;objectName:'search';Layout.fillWidth:true;visible:app.searchOpen;implicitHeight:44;text:app.searchText;onTextChanged:app.searchText=text
             placeholderText:['Search tasks…','Search missed tasks…','Search schedule…','Search all classes…','Search grades…','Search LVS…'][app.section];Accessible.name:'Search current tab';color:Theme.text;placeholderTextColor:Theme.secondary;leftPadding:18;selectByMouse:true
             background:Surface{radius:22;border.color:search.activeFocus?Theme.blue:Theme.rim}
@@ -223,9 +223,13 @@ ApplicationWindow {
         Capsule {text:'Install update';visible:app.production&&backend.notice.kind==='update';enabled:!app.busy;onClicked:if(app.flushEdits())backend.installUpdate()}
         Capsule {text:'Dismiss';onClicked:noticeSheet.dismiss()}
     }
+    Sheet {id:warningsSheet;objectName:'warningsSheet';title:'Sync warnings'
+        Label {textFormat:Text.PlainText;text:app.production?backend.warnings:'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
+        Capsule {text:'Dismiss';onClicked:warningsSheet.close()}
+    }
     Sheet {id:errorSheet;objectName:'errorSheet';title:'Could not complete the action';Label {textFormat:Text.PlainText;text:app.errorText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text} Capsule {text:'Retry sync';enabled:!app.busy;onClicked:{errorSheet.close();app.syncNow()}} Capsule {text:'Change login details';onClicked:app.changeAccount()}}
-    Shortcut{sequence:'Ctrl+F';enabled:!app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
-    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible;onActivated:app.focusOpen=false}
+    Shortcut{sequence:'Ctrl+F';enabled:!app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
+    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:app.focusOpen=false}
     Repeater{model:[Qt.TopEdge,Qt.BottomEdge,Qt.LeftEdge,Qt.RightEdge,Qt.TopEdge|Qt.LeftEdge,Qt.TopEdge|Qt.RightEdge,Qt.BottomEdge|Qt.LeftEdge,Qt.BottomEdge|Qt.RightEdge]
         MouseArea{required property int modelData;visible:app.visibility!==Window.Maximized;z:20
             width:(modelData&Qt.LeftEdge)||(modelData&Qt.RightEdge)?6:app.width-12
