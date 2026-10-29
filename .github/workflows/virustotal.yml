@@ -1,0 +1,69 @@
+name: Scan released installer with VirusTotal
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing public release to submit
+        required: true
+        default: v3.0.0-alpha
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify published installer
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > release.json
+          jq -e '.draft == false' release.json > /dev/null
+          for name in SmartschoolPlanner-Setup.exe SmartschoolPlanner-Setup.exe.sha256; do
+            url=$(jq -er --arg name "$name" '.assets[] | select(.name == $name) | .browser_download_url' release.json)
+            [[ "$url" == "https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG/$name" ]] || { echo 'Unexpected release asset address'; exit 1; }
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 300 "$url" --output "$name"
+          done
+          expected=$(awk 'NR==1 {print $1}' SmartschoolPlanner-Setup.exe.sha256)
+          [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || { echo 'Invalid checksum'; exit 1; }
+          actual=$(sha256sum SmartschoolPlanner-Setup.exe | cut -d ' ' -f 1)
+          [[ "${expected,,}" == "$actual" ]] || { echo 'Installer checksum mismatch'; exit 1; }
+          printf 'INSTALLER_SHA256=%s\n' "$actual" >> "$GITHUB_ENV"
+          printf 'Verified release: %s\nSHA-256: %s\n' "$RELEASE_TAG" "$actual"
+
+      - name: Submit installer without executing it
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$VIRUSTOTAL_API_KEY" ]] || { echo 'Add the VIRUSTOTAL_API_KEY repository secret first'; exit 1; }
+          curl --fail --silent --show-error --max-time 60 \
+            --header "x-apikey: $VIRUSTOTAL_API_KEY" \
+            'https://www.virustotal.com/api/v3/files/upload_url' --output upload.json
+          upload_url=$(jq -er '.data' upload.json)
+          [[ "$upload_url" == https://www.virustotal.com/* ]] || { echo 'Unexpected VirusTotal upload host'; exit 1; }
+          curl --fail --silent --show-error --max-time 600 \
+            --header "x-apikey: $VIRUSTOTAL_API_KEY" \
+            --form 'file=@SmartschoolPlanner-Setup.exe' "$upload_url" --output analysis.json
+          analysis_id=$(jq -er '.data.id' analysis.json)
+          {
+            echo '## VirusTotal submission accepted'
+            printf '\nRelease: `%s`\n' "$RELEASE_TAG"
+            printf '\nSHA-256: `%s`\n' "$INSTALLER_SHA256"
+            printf '\nAnalysis ID: `%s`\n' "$analysis_id"
+            printf '\n[Open file report](https://www.virustotal.com/gui/file/%s/detection)\n' "$INSTALLER_SHA256"
+            echo ''
+            echo 'Engines may still be analysing the file. Submission success is not a clean verdict.'
+            echo 'Only the public installer was uploaded. The installer was never executed.'
+          } >> "$GITHUB_STEP_SUMMARY"
