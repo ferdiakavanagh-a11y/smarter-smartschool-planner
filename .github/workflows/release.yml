@@ -65,8 +65,6 @@ jobs:
         with:
           name: SmartschoolPlanner-Setup
           path: installer_output
-      - name: Verify release publisher
-        run: python -c "from pathlib import Path; from updater import verify_installer_signature; verify_installer_signature(Path('installer_output/SmartschoolPlanner-Setup.exe'))"
       - name: Attach to release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:

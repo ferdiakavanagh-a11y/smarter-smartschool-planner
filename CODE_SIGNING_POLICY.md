@@ -6,17 +6,15 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 > application is approved and signing is set up, Windows release files are **not signed** and
 > Windows SmartScreen may show a warning. This page will be updated when that changes.
 
-Automatic installation is paused while signing is pending. The updater now requires
-a Windows-valid Authenticode signature whose signing certificate SHA-256 fingerprint
-is listed in `updater.TRUSTED_SIGNER_SHA256`. An empty list refuses installation before
-downloading; an unsigned, invalid or unexpected signer is refused. This source change
-does not change the behavior of already installed older releases.
+Unsigned releases are currently published and supported by automatic updates.
+Updates must come from the configured GitHub release source, match their SHA-256
+checksum and contain a Windows executable. SHA-256 detects mismatched downloads;
+it does not provide independent publisher authentication.
 
-The release workflow builds a candidate with read-only repository access. Its separate
-publication job checks the same publisher rule before attaching files. Until signing
-is approved and integrated, candidates can be built locally or downloaded as workflow
-artifacts, but this publication gate will reject them. No certificate was invented or
-added by this change.
+Authenticode verification is enabled when `updater.TRUSTED_SIGNER_SHA256` contains
+approved certificate fingerprints. While that set is empty, signing is optional.
+The release workflow publishes the installer and checksum without a signing gate.
+Windows SmartScreen may warn about unsigned installers.
 
 Before enabling signed releases: obtain the approved public certificate, verify its
 identity out of band, compute SHA-256 over the certificate DER bytes, and place that

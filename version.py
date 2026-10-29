@@ -17,6 +17,6 @@ Fixed account identification after Smartschool's homepage changes. Improved
 deadline handling, cache validation, durable saves and protected account storage.
 
 ## Safer updates
-Automatic installation requires a trusted publisher signature. It remains
-paused while signing approval is pending; manual downloads remain available.
+Automatic updates verify the release download and SHA-256 checksum. Installers
+are currently unsigned while code signing is pending.
 """

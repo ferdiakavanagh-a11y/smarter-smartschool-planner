@@ -164,9 +164,9 @@ def _expected_hash(info: dict) -> str:
 
 
 def verify_installer_signature(path: Path) -> None:
-    """Require Windows trust validation and the publisher certificate pinned in this app."""
+    """Check the pinned publisher when signing is configured; otherwise allow unsigned releases."""
     if not TRUSTED_SIGNER_SHA256:
-        raise UpdateError("Automatic installation is paused until signed releases are available. Use the project's Releases page for manual downloads.")
+        return
     literal = "'" + str(path.resolve()).replace("'", "''") + "'"
     script = ("$ErrorActionPreference='Stop'; $s=Get-AuthenticodeSignature -LiteralPath " + literal + "; "
               "@{status=[string]$s.Status; certificate=$(if($s.SignerCertificate){"
@@ -201,8 +201,6 @@ def _cleanup_token(path: Path) -> str | None:
 
 def download_and_verify(info: dict, progress=None) -> Path:
     """Download the installer to a temp folder and check its SHA-256. Raises UpdateError if anything is off."""
-    if not TRUSTED_SIGNER_SHA256:
-        verify_installer_signature(Path(INSTALLER_NAME))
     url = info.get("installer_url") or ""
     if not _url_ok(url):
         raise UpdateError("The installer address was unexpected, so the update was refused.")
