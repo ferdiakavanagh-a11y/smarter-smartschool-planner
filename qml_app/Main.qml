@@ -176,7 +176,7 @@ ApplicationWindow {
     SettingsPanel {id:settings;objectName:'settingsPanel';app:app;backdrop:backdrop}
     Sheet {
         id:notes;objectName:'noteDialog';property string taskId:'';property string taskTitle:''
-        title:'Task details';implicitHeight:600
+        title:'Task details'
         beforeClose:function(){if(noteText.length>5000){noteError.text='Your note is too long. Shorten it to keep your changes.';return false}return tasks.change(taskId,'note',noteText.text)}
         onOpened:noteText.forceActiveFocus()
         Label {textFormat:Text.PlainText;text:notes.taskTitle;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:20*Theme.textScale;}
@@ -191,7 +191,7 @@ ApplicationWindow {
         Label {textFormat:Text.PlainText;id:noteError;Layout.fillWidth:true;wrapMode:Text.Wrap;text:noteText.length+' / 5,000'+(app.production?' · saved on this computer':' · memory only');color:noteText.length>5000?Theme.red:Theme.secondary}
         Capsule {text:'Save note';primary:true;Layout.fillWidth:true;onClicked:notes.dismiss()}
     }
-    Sheet {id:details;implicitHeight:500
+    Sheet {id:details
         Capsule {visible:app.production&&app.detailToken.startsWith('notes:');text:'Reload note';onClicked:{detailsText.text='Loading note…';backend.openNote(app.detailToken.slice(6))}}
         Capsule {visible:app.production&&backend.school!=='';text:'Open Smartschool';onClicked:backend.openExternal('https://'+backend.school.replace(/^https?:\/\//,''))}
         Repeater {model:app.production?(app.sectionInfo.links||[]):[];Capsule {required property var modelData;Layout.fillWidth:true;text:modelData.name||'Open link';enabled:!!modelData.url;onClicked:backend.openExternal(modelData.url)}}
