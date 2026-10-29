@@ -86,7 +86,7 @@ jobs:
           curl --fail --silent --show-error --max-time 60 \
             --header "x-apikey: $VIRUSTOTAL_API_KEY" \
             "https://www.virustotal.com/api/v3/files/$INSTALLER_SHA256" --output report.json
-          jq '.data.attributes | {sha256, size, type_description, last_analysis_date, last_analysis_stats, tags, popular_threat_classification, sandbox_verdicts, detections: [.last_analysis_results | to_entries[] | select(.value.category == "malicious" or .value.category == "suspicious") | {engine: .key, category: .value.category, result: .value.result, engine_update: .value.engine_update}]}' report.json | tee results.json
+          jq '.data.attributes | {sha256, size, type_description, last_analysis_date, last_analysis_stats, tags, popular_threat_classification, sandbox_verdicts, microsoft: .last_analysis_results.Microsoft, incomplete_engines: [.last_analysis_results | to_entries[] | select(.value.category == "timeout" or .value.category == "type-unsupported" or .value.category == "failure" or .value.category == "confirmed-timeout") | {engine: .key, category: .value.category}], detections: [.last_analysis_results | to_entries[] | select(.value.category == "malicious" or .value.category == "suspicious") | {engine: .key, category: .value.category, result: .value.result, engine_update: .value.engine_update}]}' report.json | tee results.json
           {
             echo '## Existing VirusTotal report'
             printf '\n[Open file report](https://www.virustotal.com/gui/file/%s/detection)\n\n' "$INSTALLER_SHA256"
