@@ -16,6 +16,7 @@ from PySide6.QtCore import QUrl
 import credential_store
 import task_state
 from .production_model import PlannerTasks, text, fields_text, planner_url, written_date, task_indicators
+from .task_details import instruction_sections
 
 
 def log_error(root, info):
@@ -32,6 +33,7 @@ def log_error(root, info):
 
 class Backend(QObject):
     changed = Signal()
+    groupsChanged = Signal(int)
     error = Signal(str)
     detailReady = Signal(str, 'QVariantMap')
     quitRequested = Signal()
@@ -106,6 +108,7 @@ class Backend(QObject):
         except Exception:
             self._status = 'Saved planner unavailable · check login details and sync again'
         self.tasks.replace(self.data)
+        self.groupsChanged.emit(-1)
         self.changed.emit()
 
     @Property(str, notify=changed)
@@ -320,6 +323,7 @@ class Backend(QObject):
             if not isinstance(current, list) or not all(isinstance(token, str) for token in current):
                 raise ValueError('Invalid read state')
             self._settings = task_state.set_setting(self.root, self.read_key(), list(dict.fromkeys(current+selected)))
+            self.groupsChanged.emit(5)
             self.changed.emit()
             return True
         except Exception:
@@ -355,12 +359,14 @@ class Backend(QObject):
         if not item:
             return {}
         flags = self.taskBadges(task_id)
-        metadata = fields_text([('Course', item.get('course')), ('Type', item.get('type')), ('Posted', written_date(item.get('posted_date'))), ('Due', written_date(item.get('due_date')))])
+        facts = [dict(label=label, value=text(value)) for label, value in
+                 [('Course', item.get('course')), ('Type', item.get('type')), ('Posted', written_date(item.get('posted_date'))), ('Due', written_date(item.get('due_date')))] if value]
+        metadata = fields_text([(fact['label'], fact['value']) for fact in facts])
         body = text(item.get('body'))
         links = list(item.get('attachments') or [])+list(item.get('weblinks') or [])
         if self.school:
             links.append(dict(name='Open in Smartschool', url=planner_url(self.data, item, item.get('posted_date'))))
-        return dict(body=body, metadata=metadata, status=flags, links=links)
+        return dict(body=body, sections=instruction_sections(item), facts=facts, metadata=metadata, status=flags, links=links)
 
     @Slot(str, result=str)
     def taskBadges(self, task_id):

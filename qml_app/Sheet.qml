@@ -4,6 +4,7 @@ import QtQuick.Layouts
 Popup {
     id: sheet
     property string title: ''
+    property bool pressedInside:false
     property var previousFocus
     readonly property var hostWindow:ApplicationWindow.window
     property var beforeClose: function(){return true}
@@ -28,11 +29,16 @@ Popup {
         if(p.y<8)flick.contentY=Math.max(0,flick.contentY+p.y-8)
         else if(p.y+item.height>scroll.height-8)flick.contentY=Math.min(Math.max(0,flick.contentHeight-flick.height),flick.contentY+p.y+item.height-scroll.height+8)
     }
-    onAboutToShow: { previousFocus=ApplicationWindow.window.activeFocusItem; scrollMotion.stop(); scroll.contentItem.cancelFlick(); scroll.contentItem.contentY=0 }
-    onClosed: if(previousFocus && previousFocus.visible)previousFocus.forceActiveFocus()
+    onAboutToShow: { previousFocus=ApplicationWindow.window.activeFocusItem;closeButton.forceActiveFocus(); scrollMotion.stop(); scroll.contentItem.cancelFlick(); scroll.contentItem.contentY=0 }
+    onClosed: {let focused=hostWindow.activeFocusItem;if(previousFocus&&previousFocus.visible&&(!focused||!focused.visible||focused===hostWindow.contentItem))previousFocus.forceActiveFocus()}
     background: Surface { radius: 30; strong: true; tracking:sheet.x+sheet.y }
-    Overlay.modal: Rectangle { color: '#66000000'
-        TapHandler { onTapped: point=>{let p=point.scenePosition;if(p.x<sheet.x || p.x>sheet.x+sheet.width || p.y<sheet.y || p.y>sheet.y+sheet.height)sheet.dismiss()} }
+    Overlay.modal: Rectangle { color: '#66000000' }
+    Overlay.onPressed: {
+        if(!sheet.visible||!sheet.activeFocus)return
+        let focused=sheet.hostWindow.activeFocusItem
+        if(focused&&focused.popup&&focused.popup.visible)return
+        sheet.pressedInside=false
+        Qt.callLater(function(){if(sheet.visible&&sheet.activeFocus&&!sheet.pressedInside)sheet.dismiss()})
     }
     enter: Transition { ParallelAnimation {
         NumberAnimation { property: 'opacity'; from: 0; to: 1; duration: Theme.motion ? 200 : 0; easing.type: Easing.OutCubic }
@@ -42,23 +48,30 @@ Popup {
         NumberAnimation { property: 'opacity'; to: 0; duration: Theme.motion ? 140 : 0 }
         NumberAnimation { property: 'scale'; to: .98; duration: Theme.motion ? 140 : 0 }
     } }
-    contentItem: ColumnLayout {
-        spacing: 0
+    contentItem: Item {
+        // Observe before child controls accept the press, without taking their grab.
         Item {
-            id: head; objectName: 'sheetHandle'; Layout.fillWidth: true; implicitHeight: Math.max(64,52*Theme.textScale)
-            Label {textFormat:Text.PlainText; anchors.left: parent.left; anchors.leftMargin: 20; anchors.verticalCenter: parent.verticalCenter; anchors.right: closeButton.left; anchors.rightMargin: 12
-                text: sheet.title; font.pixelSize: 22*Theme.textScale; font.bold: true; color: Theme.text; elide: Text.ElideRight }
-            Capsule { id: closeButton; anchors.right: parent.right; anchors.rightMargin: 20; anchors.verticalCenter: parent.verticalCenter
-                text: 'Close'; symbol: 'close'; iconOnly: true; onClicked: sheet.dismiss() }
+            anchors.fill: parent; z: 10000
+            PointHandler {onActiveChanged:if(active)sheet.pressedInside=true}
         }
-        ScrollView { id: scroll; objectName: 'sheetScroll'; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
-            contentWidth: availableWidth; contentHeight: bodyColumn.implicitHeight+24
-            SmoothScroll { id:scrollMotion; view:scroll.contentItem }
-            ColumnLayout { id: bodyColumn; objectName:'dialogBody'; width: scroll.availableWidth-40; x: 20; spacing: 18 }
+        ColumnLayout {
+            anchors.fill: parent; spacing: 0
+            Item {
+                id: head; objectName: 'sheetHandle'; Layout.fillWidth: true; implicitHeight: Math.max(64,52*Theme.textScale)
+                Label {textFormat:Text.PlainText; anchors.left: parent.left; anchors.leftMargin: 20; anchors.verticalCenter: parent.verticalCenter; anchors.right: closeButton.left; anchors.rightMargin: 12
+                    text: sheet.title; font.pixelSize: 22*Theme.textScale; font.bold: true; color: Theme.text; elide: Text.ElideRight }
+                Capsule { id: closeButton; anchors.right: parent.right; anchors.rightMargin: 20; anchors.verticalCenter: parent.verticalCenter
+                    text: 'Close'; symbol: 'close'; iconOnly: true; onClicked: sheet.dismiss() }
+            }
+            ScrollView { id: scroll; objectName: 'sheetScroll'; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                contentWidth: availableWidth; contentHeight: bodyColumn.implicitHeight+24
+                SmoothScroll { id:scrollMotion; view:scroll.contentItem }
+                ColumnLayout { id: bodyColumn; objectName:'dialogBody'; width: scroll.availableWidth-40; x: 20; spacing: 18 }
+            }
         }
     }
-    Shortcut { sequence: 'Escape'; enabled: sheet.opened; onActivated: sheet.dismiss() }
-    Connections {target:sheet.opened?sheet.hostWindow:null
+    Shortcut { sequence: 'Escape'; enabled: sheet.visible&&sheet.activeFocus; onActivated: sheet.dismiss() }
+    Connections {target:sheet.visible?sheet.hostWindow:null
         function onActiveFocusItemChanged(){Qt.callLater(sheet.revealFocus)}
     }
 }

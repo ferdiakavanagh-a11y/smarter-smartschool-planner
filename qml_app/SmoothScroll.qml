@@ -10,6 +10,12 @@ WheelHandler {
     enabled: view.visible && Theme.active
     onEnabledChanged: if (!enabled) stop()
     function stop() { glide.stop(); edge=0 }
+    function clampHorizontal() {
+        if (!horizontal) return
+        stop(); view.cancelFlick()
+        let start=view.originX-view.leftMargin, end=Math.max(start,view.originX+view.contentWidth-view.width+view.rightMargin)
+        view.contentX=Math.max(start,Math.min(end,view.contentX))
+    }
     function settleEdge() {
         // Virtualized lists can revise origin/content size while the wheel is moving.
         if (!edge) return
@@ -37,6 +43,8 @@ WheelHandler {
         function onCurrentIndexChanged() { wheel.stop() }
         function onCountChanged() { wheel.stop() }
         function onModelChanged() { wheel.stop() }
+        function onWidthChanged() { wheel.clampHorizontal() }
+        function onContentWidthChanged() { wheel.clampHorizontal() }
         function onHeightChanged() { if (!wheel.glide.running) wheel.settleEdge() }
         function onContentHeightChanged() { if (!wheel.glide.running && wheel.edge) Qt.callLater(wheel.settleEdge) }
     }

@@ -19,6 +19,9 @@ Item {
     Component.onCompleted: ready=true
     onCurrentChanged: if(ready)movingRight=10+current*cell>=leftEdge
     signal picked(int index)
+    function keyboardPick(index){let tab=tabs.itemAt(index);if(tab)tab.forceActiveFocus(Qt.TabFocusReason);picked(index)}
+    onVisibleChanged:if(!visible)canceled=true
+    Connections {target:bar.ApplicationWindow.window;function onVisibleChanged(){if(!target.visible)bar.canceled=true}}
     implicitHeight: symbols.length ? 76 : 48
     readonly property real cell: (width - 20) / Math.max(1,labels.length)
     readonly property int preview: Math.max(0,Math.min(labels.length-1,Math.floor((scrub.centroid.position.x-10)/cell)))
@@ -41,7 +44,7 @@ Item {
         strength:bar.symbols.length?24:30
     }
     Row { x: 10; y: 8
-        Repeater { model: bar.labels
+        Repeater { id:tabs;model: bar.labels
             Button {
                 id: tab
                 required property string modelData
@@ -66,8 +69,8 @@ Item {
                     visible:count>0;width:Math.max(20,countLabel.implicitWidth+10);height:20;radius:10;x:parent.width/2+8;y:0;color:'#c9322b'
                     Text {id:countLabel;textFormat:Text.PlainText;anchors.centerIn:parent;text:parent.count>99?'99+':parent.count;color:'white';font.pixelSize:12;font.bold:true} }
                 Keys.onReturnPressed: bar.picked(index)
-                Keys.onLeftPressed: { bar.picked((bar.current+bar.labels.length-1)%bar.labels.length); }
-                Keys.onRightPressed: { bar.picked((bar.current+1)%bar.labels.length); }
+                Keys.onLeftPressed: bar.keyboardPick((bar.current+bar.labels.length-1)%bar.labels.length)
+                Keys.onRightPressed: bar.keyboardPick((bar.current+1)%bar.labels.length)
             }
         }
     }

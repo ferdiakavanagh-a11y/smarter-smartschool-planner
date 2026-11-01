@@ -11,9 +11,7 @@ ColumnLayout {
     property string kind: 'All types'
     property bool completedOpen: false
     property bool entryPending:true
-    property int entryFrames:0
-    property bool centeredEntry:false
-    function requestEntry(){entryPending=true;entryFrames=0;app.headerCollapsed=false;scrollMotion.stop();list.cancelFlick();Qt.callLater(list.positionEntry)}
+    function requestEntry(){entryPending=true;app.headerCollapsed=false;scrollMotion.stop();list.cancelFlick();Qt.callLater(list.positionEntry)}
     Component.onCompleted:requestEntry()
     onVisibleChanged:if(visible)requestEntry()
     Connections {target:tasks;function onChoicesChanged(){if(planner.visible)planner.requestEntry()}}
@@ -59,31 +57,29 @@ ColumnLayout {
         function positionEntry(){
             if(!planner.visible||height<=0)return
             forceLayout()
-            let index=app.section===0&&!app.searchText.trim()?tasks.todayIndex():-1
-            planner.centeredEntry=index>=0
-            if(index>=0)positionViewAtIndex(index,ListView.Center)
-            else positionViewAtBeginning()
+            positionViewAtBeginning()
         }
-        function resetTop(){planner.centeredEntry=false;scrollMotion.stop();forceLayout();positionViewAtBeginning()}
+        function resetTop(){scrollMotion.stop();forceLayout();positionViewAtBeginning()}
         Layout.fillWidth:true;Layout.fillHeight:true;Layout.leftMargin:-16;Layout.rightMargin:-16
-        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:Math.max(100*Theme.textScale,planner.centeredEntry?height/2:0)
+        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:100*Theme.textScale
         displayMarginBeginning:220*Theme.textScale
         Connections {target:app
-            function onFrameSwapped(){
+            function onAfterAnimating(){
                 if(!planner.entryPending||!planner.visible||list.height<=0)return
+                app.settleHeader()
                 list.positionEntry()
-                if(++planner.entryFrames>=2){planner.entryPending=false;app.sceneReady=true}
+                planner.entryPending=false;app.sceneReady=true
             }
         }
         boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:'Tasks grouped by due date'
-        ScrollBar.vertical:ScrollBar{}
+        ScrollBar.vertical:ScrollBar{id:scrollBar;parent:planner.parent;visible:planner.visible;x:planner.x+list.x+list.width-width-16;y:planner.y+list.y;height:list.height}
         SmoothScroll { id:scrollMotion; objectName:'taskScrollMotion'; view:list }
         removeDisplaced:Transition {NumberAnimation {property:'y';duration:Theme.motion?260:0;easing.type:Easing.OutCubic}}
         onWidthChanged:if(planner.entryPending)Qt.callLater(positionEntry)
         onContentYChanged:{
             if(planner.entryPending)return
             if(planner.activeRemovals&&(dragging||scrollMotion.glide.running))planner.keepCompletionTop=false
-            if(planner.visible&&!planner.activeRemovals)app.headerCollapsed=app.sceneReady&&contentY-originY>80&&!app.searchOpen
+            if(planner.visible&&!planner.activeRemovals&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=app.sceneReady&&contentY-originY>80&&!app.searchOpen
         }
         header:Column {
             spacing:10
@@ -132,6 +128,7 @@ ColumnLayout {
             required property int index
             property bool finishing:false
             property bool pooled:false
+            onDoneChanged:if(finishing&&!done){completionExit.stop();finishing=false;opacity=Qt.binding(function(){return taskRow.finishing?1:taskRow.done?.55:1});planner.finishFeedback()}
             function complete(){
                 let id=taskId,target=!done,host=planner.app
                 let feedback=Theme.motion&&target&&(app.section===1||!planner.completedOpen&&!app.searchText.trim())
@@ -214,5 +211,6 @@ ColumnLayout {
         }
         Keys.onSpacePressed:if(currentItem)currentItem.complete()
         Keys.onReturnPressed:if(currentItem)planner.editNote(currentItem.taskId,currentItem.title,currentItem.note)
+        Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){list.positionViewAtIndex(list.currentIndex,ListView.Contain);Qt.callLater(function(){if(!planner.entryPending)app.headerCollapsed=list.contentY-list.originY>80&&!app.searchOpen})}}
     }
 }

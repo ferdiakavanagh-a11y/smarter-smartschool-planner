@@ -10,9 +10,9 @@ ApplicationWindow {
     property var sectionInfo:({})
     property string detailToken:''
     property string errorText:''
-    width:1100;height:800;minimumWidth:focusOpen?360:760;minimumHeight:focusOpen?420:600
+    width:1100;height:800;minimumWidth:focusPresented?360:760;minimumHeight:focusPresented?420:600
     visible:false;title:production?'Smartschool Planner':'Smartschool Planner · demo';color:Theme.bg
-    flags:Qt.Window | Qt.FramelessWindowHint | (focusOpen&&focusOnTop?Qt.WindowStaysOnTopHint:0)
+    flags:Qt.Window | Qt.FramelessWindowHint | (focusPresented&&focusOnTop?Qt.WindowStaysOnTopHint:0)
     property alias sceneBackdrop:backdrop
     property alias controlsBackdrop:topSource
     property alias controlsLayer:floatingControls
@@ -25,6 +25,12 @@ ApplicationWindow {
     property var appearance:Theme
     property int section:0
     property bool focusOpen:false
+    property bool focusPresented:false
+    property real plannerReveal:focusPresented?0:1
+    Behavior on plannerReveal {enabled:!app.focusPresented;NumberAnimation {duration:Theme.motion?140:0;easing.type:Easing.OutCubic}}
+    property real focusReveal:focusOpen?1:0
+    Behavior on focusReveal {NumberAnimation {duration:!app.renderActive?0:Theme.reducedMotion?100:app.focusOpen?220:140;easing.type:Easing.OutCubic}}
+    onFocusRevealChanged:if(focusReveal===0&&!focusOpen)restoreFocusBounds()
     property bool focusOnTop:false
     property bool searchOpen:false
     property string searchText:''
@@ -35,7 +41,6 @@ ApplicationWindow {
     property var activeToolTip:null
     property rect savedBounds
     property bool wasMaximized:false
-    property int previousSection:0
     readonly property bool renderActive:visible&&visibility!==Window.Minimized
     readonly property bool motion:Theme.motion
     property string phase:'idle'
@@ -56,7 +61,8 @@ ApplicationWindow {
         function onWallpaperIndexChanged(){preferenceSave.restart()} function onReducedMotionChanged(){preferenceSave.restart()} function onAnimatedBackgroundChanged(){preferenceSave.restart()} function onHighContrastChanged(){preferenceSave.restart()}
     }
     Connections {target:app.production?backend:null
-        function onChanged(){app.fixtureRevision++;app.busy=backend.busy;Qt.callLater(app.showNotice)}
+        function onChanged(){app.busy=backend.busy;Qt.callLater(app.showNotice)}
+        function onGroupsChanged(section){if(section<0||app.section===section)app.fixtureRevision++}
         function onError(message){app.errorText=message;errorSheet.open()}
         function onDetailReady(token,info){if(details.visible&&token===app.detailToken){app.sectionInfo=info;detailsText.text=info.body}}
         function onQuitRequested(){app.close()}
@@ -86,16 +92,26 @@ ApplicationWindow {
     }
     function openSection(item){sectionInfo=item;detailToken=item.id;details.title=item.title;detailsText.text=item.body;details.open();if(item.kind==='notes'){detailsText.text='Loading note…';backend.openNote(item.id.slice(6))}else if(item.kind==='absences')backend.markRead(item.id)}
     function pickSection(i){focusOpen=false;if(i===5&&section===5)sectionPages.requestTop();section=i}
-    onSectionChanged:{let start=contentShift.running?tabShift.x:section>previousSection?14:-14;contentShift.stop();contentShift.from=start;contentShift.start();previousSection=section}
+    // Snap interrupted scroll motion before measuring a newly entered page.
+    function settleHeader(){headerMotion.complete();headerFrame.Layout.preferredHeight=Qt.binding(function(){return app.headerCollapsed&&!app.searchOpen?0:headerFrame.implicitHeight});content.ensurePolished()}
+    function restoreFocusBounds(){
+        if(focusOpen||!focusPresented)return
+        width=savedBounds.width;height=savedBounds.height;x=savedBounds.x;y=savedBounds.y
+        focusOnTop=false;focusPresented=false
+        if(wasMaximized)showMaximized()
+    }
     onFocusOpenChanged:{
-        if(focusOpen){savedBounds=Qt.rect(x,y,width,height);wasMaximized=visibility===Window.Maximized;showNormal();Qt.callLater(function(){if(app.focusOpen){app.width=420;app.height=560}});stopwatch.reset();stopwatch.toggle()}
-        else if(savedBounds.width){width=savedBounds.width;height=savedBounds.height;x=savedBounds.x;y=savedBounds.y;focusOnTop=false;if(wasMaximized)showMaximized()}
+        if(focusOpen&&!focusPresented){
+            savedBounds=Qt.rect(x,y,width,height);wasMaximized=visibility===Window.Maximized
+            focusPresented=true;showNormal();width=420;height=560
+            stopwatch.reset();stopwatch.toggle()
+        }else if(!focusOpen&&focusReveal===0)restoreFocusBounds()
     }
     onClosing:close=>{if(!flushEdits()){close.accepted=false;noteText.forceActiveFocus()}}
     Item {id:plannerScene;anchors.fill:parent
-    Wallpaper {id:backdrop;objectName:'backdrop';anchors.fill:parent;animate:Theme.fancy&&Theme.animatedBackground&&!Theme.reducedMotion&&!app.focusOpen&&app.active&&!app.busy}
+    Wallpaper {id:backdrop;objectName:'backdrop';anchors.fill:parent;animate:Theme.fancy&&Theme.animatedBackground&&!Theme.reducedMotion&&!app.focusPresented&&app.active&&!app.busy}
     Item {
-        id:windowBar;width:parent.width;height:32;visible:!app.focusOpen;z:5
+        id:windowBar;width:parent.width;height:32;visible:!app.focusPresented;opacity:app.plannerReveal;z:5
         MouseArea {anchors.fill:parent;onPressed:app.startSystemMove();onDoubleClicked:app.visibility===Window.Maximized?app.showNormal():app.showMaximized()}
         Row {anchors.right:parent.right;anchors.rightMargin:14;anchors.verticalCenter:parent.verticalCenter;spacing:8
             Repeater {model:[{name:'Minimize',color:'#ffbd2e',symbol:'−'},{name:'Maximize',color:'#28c840',symbol:'+'},{name:'Close',color:'#ff5f57',symbol:'×'}]
@@ -108,14 +124,13 @@ ApplicationWindow {
         }
     }
     ColumnLayout {
-        id:content;visible:!app.focusOpen
-        anchors.fill:parent;anchors.topMargin:24;anchors.leftMargin:20;anchors.rightMargin:20;spacing:6
-        transform:Translate{id:tabShift}
-        readonly property real glassMotion:tabShift.x
-        Item {id:headerFrame;Layout.fillWidth:true;implicitHeight:app.headerCollapsed&&!app.searchOpen?0:75*Theme.textScale;clip:app.headerCollapsed;z:3
+        // Keep the reading position while Focus temporarily resizes the window.
+        id:content;opacity:app.plannerReveal;enabled:!app.focusPresented
+        x:20;y:24;width:(app.focusPresented?app.savedBounds.width:app.width)-40;height:(app.focusPresented?app.savedBounds.height:app.height)-24;spacing:6
+        Item {id:headerFrame;Layout.fillWidth:true;implicitHeight:75*Theme.textScale;Layout.preferredHeight:app.headerCollapsed&&!app.searchOpen?0:implicitHeight;clip:app.headerCollapsed;z:3
             opacity:app.headerCollapsed&&!app.searchOpen?0:1
             Behavior on opacity{enabled:!planner.entryPending&&!sectionPages.topResetPending;NumberAnimation{duration:Theme.motion?200:0}}
-            Behavior on implicitHeight{enabled:!planner.entryPending&&!sectionPages.topResetPending;NumberAnimation{duration:Theme.motion?300:0;easing.type:Easing.OutCubic}}
+            Behavior on Layout.preferredHeight{enabled:Theme.motion&&(app.section<2?!planner.entryPending:!sectionPages.topResetPending);NumberAnimation{id:headerMotion;duration:220;easing.type:Easing.OutCubic}}
             Item {anchors.fill:parent;anchors.leftMargin:0;anchors.rightMargin:0
                 ColumnLayout {anchors.left:parent.left;anchors.right:headerSlot.left;anchors.rightMargin:16;anchors.verticalCenter:parent.verticalCenter;spacing:3
                     Label {textFormat:Text.PlainText;text:['Planner','Missed','Schedule','All Classes','Grades','LVS'][app.section];font.pixelSize:34*Theme.textScale;font.bold:true;color:Theme.text
@@ -128,7 +143,7 @@ ApplicationWindow {
                 Item {id:headerSlot;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;width:headerActions.implicitWidth;height:38
                 Row {id:headerActions;parent:floatingControls;spacing:8
                 readonly property point origin:app.controlPosition(headerSlot)
-                x:origin.x;y:origin.y;opacity:headerFrame.opacity;visible:!app.focusOpen&&opacity>0
+                x:origin.x;y:origin.y;opacity:headerFrame.opacity;visible:!app.focusPresented&&opacity>0
                 Capsule {selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;text:'Search';symbol:'searchBtn';iconOnly:true;onClicked:{app.searchOpen=!app.searchOpen;if(app.searchOpen)search.forceActiveFocus();else app.searchText=''}}
                 Capsule {selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;text:app.production?'Sync now':'Refresh synthetic data';symbol:'syncBtn';iconOnly:true;onClicked:{if(app.production){app.syncNow()}else{app.busy=true;refreshTimer.restart()}}
                     RotationAnimator on rotation {from:0;to:360;duration:900;loops:Animation.Infinite;running:app.busy&&app.renderActive&&app.active&&Theme.motion}}
@@ -143,7 +158,7 @@ ApplicationWindow {
             background:Surface{radius:22;border.color:search.activeFocus?Theme.blue:Theme.rim}
             Keys.onEscapePressed:{app.searchOpen=false;app.searchText=''}
         }
-        Item {objectName:'pageViewport';clip:true;Layout.fillWidth:true;Layout.fillHeight:true
+        Item {objectName:'pageViewport';clip:!app.headerCollapsed||app.searchOpen;Layout.fillWidth:true;Layout.fillHeight:true
         PlannerView {id:planner;app:app;anchors.fill:parent;visible:app.section<2
             onFocusTask:(id,title,done)=>{focusView.taskId=id;focusView.taskTitle=title;focusView.completed=done;app.focusOpen=true}
             onEditNote:(id,title,note)=>app.showTask(id,title,note)
@@ -151,51 +166,71 @@ ApplicationWindow {
         SectionsView {id:sectionPages;app:app;anchors.fill:parent;anchors.leftMargin:-16;anchors.rightMargin:-16;visible:app.section>=2;onDetail:(title,body)=>{details.title=title;detailsText.text=body;details.open()}}
         }
     }
-    NumberAnimation {id:contentShift;target:tabShift;property:'x';to:0;duration:Theme.motion?280:0;easing.type:Easing.OutCubic}
     }
     // One bounded capture for the floating controls; those controls live outside its source.
     ShaderEffectSource {id:topSource;objectName:'topControlSource';visible:false
         width:app.width;height:Math.min(app.height,(app.headerCollapsed?112:220)*Theme.textScale+(planner.typeMenuVisible||sectionPages.courseMenuVisible?240:0))
-        sourceItem:app.renderActive&&!app.focusOpen&&!Theme.highContrast?plannerScene:null
+        sourceItem:app.renderActive&&!app.focusPresented&&!Theme.highContrast?plannerScene:null
         sourceRect:Qt.rect(0,0,width,height);textureSize:Qt.size(Math.ceil(width*(Theme.fancy?1:.65)),Math.ceil(height*(Theme.fancy?1:.65)))
-        hideSource:false;live:app.renderActive&&!app.focusOpen;mipmap:true;smooth:true
+        hideSource:false;live:app.renderActive&&!app.focusPresented;mipmap:true;smooth:true
     }
-    Item {id:floatingControls;anchors.fill:parent;visible:!app.focusOpen;z:4}
+    Item {id:floatingControls;anchors.fill:parent;visible:!app.focusPresented;opacity:app.plannerReveal;z:4}
     ShaderEffectSource {
         id:dockSource;objectName:'dockSource';visible:false
         x:navigation.x-72;y:navigation.y-72;width:navigation.width+144;height:navigation.height+144
-        sourceItem:app.renderActive&&!app.focusOpen&&!Theme.highContrast?plannerScene:null
+        sourceItem:app.renderActive&&!app.focusPresented&&!Theme.highContrast?plannerScene:null
         sourceRect:Qt.rect(x,y,width,height);textureSize:Qt.size(Math.ceil(width*(Theme.fancy?1:.65)),Math.ceil(height*(Theme.fancy?1:.65)))
-        hideSource:false;live:app.renderActive&&!app.focusOpen;mipmap:true;smooth:true
+        hideSource:false;live:app.renderActive&&!app.focusPresented;mipmap:true;smooth:true
     }
-    LensBar {id:navigation;objectName:'navigation';visible:!app.focusOpen
+    LensBar {id:navigation;objectName:'navigation';visible:!app.focusPresented;opacity:app.plannerReveal
         anchors.bottom:parent.bottom;anchors.bottomMargin:10;anchors.horizontalCenter:parent.horizontalCenter;width:Math.min(parent.width-32,560*Theme.textScale);height:74*Theme.textScale
         backdrop:dockSource;labels:['To-Do','Missed','Schedule','All Classes','Grades','LVS'];symbols:['todo','missed','schedule','all','grades','lvs'];missedCount:tasks.missedCount;unreadCount:app.production?backend.unreadCount:0;current:app.section;onPicked:i=>app.pickSection(i)
     }
-    FocusView {id:focusView;app:app;backdrop:backdrop;anchors.fill:parent;visible:app.focusOpen;onLeave:app.focusOpen=false}
+    FocusView {id:focusView;app:app;backdrop:backdrop;anchors.fill:parent;visible:app.focusPresented;opacity:app.focusReveal
+        scale:Theme.reducedMotion?1:.97+.03*app.focusReveal
+        transform:Translate {y:Theme.reducedMotion?0:10*(1-app.focusReveal)}
+        onLeave:app.focusOpen=false}
     SettingsPanel {id:settings;objectName:'settingsPanel';app:app;backdrop:backdrop}
     Sheet {
         id:notes;objectName:'noteDialog';property string taskId:'';property string taskTitle:''
         title:'Task details'
+        width:Math.min(820*Theme.textScale,parent.width-24)
         beforeClose:function(){if(noteText.length>5000){noteError.text='Your note is too long. Shorten it to keep your changes.';return false}return tasks.change(taskId,'note',noteText.text)}
-        onOpened:noteText.forceActiveFocus()
-        Label {textFormat:Text.PlainText;text:notes.taskTitle;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:20*Theme.textScale;}
-        Label {textFormat:Text.PlainText;text:'INSTRUCTIONS';color:Theme.secondary;font.bold:true;font.pixelSize:13}
-        Label {textFormat:Text.PlainText;text:app.production?(app.taskInfo.body||'No additional instructions.'):'Synthetic study material. Review the topic, record your working and bring one question to class.';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
-        Label {textFormat:Text.PlainText;visible:app.production;text:app.taskInfo.metadata||'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.secondary}
-        Label {textFormat:Text.PlainText;visible:app.production&&!!app.taskInfo.status;text:app.taskInfo.status||'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.orange}
-        Repeater {model:app.production?(app.taskInfo.links||[]):[];Capsule {required property var modelData;text:modelData.name||modelData.url||'Attachment';Layout.fillWidth:true;enabled:!!modelData.url;onClicked:backend.openExternal(modelData.url)}}
-        Label {textFormat:Text.PlainText;text:'YOUR NOTE';color:Theme.secondary;font.bold:true;font.pixelSize:13}
-        TextArea {id:noteText;objectName:'noteText';Layout.fillWidth:true;Layout.preferredHeight:150;wrapMode:TextEdit.Wrap;selectByMouse:true;Accessible.name:'Task note';placeholderText:'Add a note…';color:Theme.text
-            background:Rectangle{radius:18;color:Theme.fill;border.color:noteText.activeFocus?Theme.blue:'transparent'} }
-        Label {textFormat:Text.PlainText;id:noteError;Layout.fillWidth:true;wrapMode:Text.Wrap;text:noteText.length+' / 5,000'+(app.production?' · saved on this computer':' · memory only');color:noteText.length>5000?Theme.red:Theme.secondary}
-        Capsule {text:'Save note';primary:true;Layout.fillWidth:true;onClicked:notes.dismiss()}
+        Label {textFormat:Text.PlainText;text:notes.taskTitle;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:22*Theme.textScale;font.bold:true}
+        DetailCard {title:'Assignment details';Layout.fillWidth:true;visible:app.production
+            GridLayout {Layout.fillWidth:true;columns:notes.width>640?2:1;columnSpacing:24;rowSpacing:14
+                Repeater {model:app.production?(app.taskInfo.facts||[]):[]
+                    ColumnLayout {required property var modelData;Layout.fillWidth:true;Layout.minimumWidth:0;Layout.alignment:Qt.AlignTop;spacing:4
+                        Label {textFormat:Text.PlainText;text:parent.modelData.label;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.secondary;font.pixelSize:12*Theme.textScale}
+                        Label {textFormat:Text.PlainText;text:parent.modelData.value;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:14*Theme.textScale}
+                    }
+                }
+            }
+        }
+        Repeater {model:app.production?(app.taskInfo.sections||[]):[{title:'Instructions',body:'Synthetic study material. Review the topic, record your working and bring one question to class.'}]
+            DetailCard {required property var modelData;objectName:'instructionCard';title:modelData.title;Layout.fillWidth:true
+                Label {objectName:'instructionBody';textFormat:Text.PlainText;text:modelData.body.replace(/\n\s*\n(?=• )/g,'\n');visible:text!=='';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:14*Theme.textScale;lineHeight:1.15}
+            }
+        }
+        DetailCard {title:'Check this assignment';Layout.fillWidth:true;visible:app.production&&!!app.taskInfo.status
+            Label {textFormat:Text.PlainText;text:app.taskInfo.status||'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.orange}
+        }
+        DetailCard {title:'Files & links';Layout.fillWidth:true;visible:app.production&&(app.taskInfo.links||[]).length>0
+            Repeater {model:app.production?(app.taskInfo.links||[]):[];Capsule {required property var modelData;text:modelData.name||modelData.url||'Attachment';Layout.fillWidth:true;enabled:!!modelData.url;onClicked:backend.openExternal(modelData.url)}}
+        }
+        DetailCard {title:'Your note';Layout.fillWidth:true
+            TextArea {id:noteText;objectName:'noteText';Layout.fillWidth:true;Layout.preferredHeight:150;wrapMode:TextEdit.Wrap;selectByMouse:true;Accessible.name:'Task note';placeholderText:'Add a note…';color:Theme.text
+                background:Rectangle{radius:12;color:Theme.fill;border.width:noteText.activeFocus?2:1;border.color:noteText.activeFocus?Theme.blue:Theme.separator} }
+            Label {textFormat:Text.PlainText;id:noteError;Layout.fillWidth:true;wrapMode:Text.Wrap;text:noteText.length+' / 5,000'+(app.production?' · saved on this computer':' · memory only');color:noteText.length>5000?Theme.red:Theme.secondary}
+            Capsule {text:'Save note';primary:true;Layout.fillWidth:true;onClicked:notes.dismiss()}
+        }
     }
     Sheet {id:details
         Capsule {visible:app.production&&app.detailToken.startsWith('notes:');text:'Reload note';onClicked:{detailsText.text='Loading note…';backend.openNote(app.detailToken.slice(6))}}
         Capsule {visible:app.production&&backend.school!=='';text:'Open Smartschool';onClicked:backend.openExternal('https://'+backend.school.replace(/^https?:\/\//,''))}
         Repeater {model:app.production?(app.sectionInfo.links||[]):[];Capsule {required property var modelData;Layout.fillWidth:true;text:modelData.name||'Open link';enabled:!!modelData.url;onClicked:backend.openExternal(modelData.url)}}
-        Repeater {model:app.production?(app.sectionInfo.assignments||[]):[];Capsule {required property var modelData;text:modelData.title;Layout.fillWidth:true;onClicked:{let task=tasks.taskNote(modelData.id);details.close();app.showTask(modelData.id,modelData.title,task)}}}
+        // Transfer focus to the replacement before Qt records the closing popup's focus.
+        Repeater {model:app.production?(app.sectionInfo.assignments||[]):[];Capsule {required property var modelData;text:modelData.title;Layout.fillWidth:true;onClicked:{let task=tasks.taskNote(modelData.id);app.showTask(modelData.id,modelData.title,task);details.close()}}}
         Label {textFormat:Text.PlainText;id:detailsText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:16*Theme.textScale}
     }
     Surface {anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;anchors.bottomMargin:110*Theme.textScale;width:toastRow.implicitWidth+24;height:52;radius:26;visible:opacity>0;opacity:app.toastText!==''?1:0;strong:true;z:3
@@ -228,7 +263,7 @@ ApplicationWindow {
         Capsule {text:'Dismiss';onClicked:warningsSheet.close()}
     }
     Sheet {id:errorSheet;objectName:'errorSheet';title:'Could not complete the action';Label {textFormat:Text.PlainText;text:app.errorText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text} Capsule {text:'Retry sync';enabled:!app.busy;onClicked:{errorSheet.close();app.syncNow()}} Capsule {text:'Change login details';onClicked:app.changeAccount()}}
-    Shortcut{sequence:'Ctrl+F';enabled:!app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
+    Shortcut{sequence:'Ctrl+F';enabled:!app.focusPresented&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:{app.searchOpen=true;search.forceActiveFocus()}}
     Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:app.focusOpen=false}
     Repeater{model:[Qt.TopEdge,Qt.BottomEdge,Qt.LeftEdge,Qt.RightEdge,Qt.TopEdge|Qt.LeftEdge,Qt.TopEdge|Qt.RightEdge,Qt.BottomEdge|Qt.LeftEdge,Qt.BottomEdge|Qt.RightEdge]
         MouseArea{required property int modelData;visible:app.visibility!==Window.Maximized;z:20

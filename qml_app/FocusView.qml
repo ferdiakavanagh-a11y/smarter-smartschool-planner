@@ -11,7 +11,7 @@ Item {
     property bool completed:false
     signal leave()
     function refresh(){elapsed=Math.floor(stopwatch.seconds())}
-    onVisibleChanged:if(visible)refresh()
+    onVisibleChanged:if(visible){focusScroll.contentItem.cancelFlick();focusScroll.contentItem.contentY=0;refresh()}
     Connections {target:stopwatch;function onChanged(){view.refresh()}}
     Timer {interval:1000;repeat:true;running:view.visible&&app.renderActive&&stopwatch.running;onTriggered:view.refresh()}
     ColumnLayout {
@@ -34,19 +34,28 @@ Item {
                 }
             }
         }
-        Item {Layout.fillWidth:true;implicitHeight:76
-            SelectorLens {objectName:'focusActionBar';anchors.fill:parent;backdrop:view.backdrop}
-            RowLayout {anchors.fill:parent;anchors.margins:8;spacing:4
+        Item {Layout.fillWidth:true;implicitHeight:Math.max(76,64*Theme.textScale)
+            Accessible.role:Accessible.ToolBar;Accessible.name:'Focus controls'
+            SelectorLens {objectName:'focusActionBar';anchors.fill:parent;backdrop:view.backdrop;radius:28}
+            RowLayout {anchors.fill:parent;anchors.margins:8;spacing:0
                 Repeater {model:4
-                    Button {id:action;required property int index;Layout.fillWidth:true;Layout.fillHeight:true
+                    Button {id:action;required property int index;Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:1;Layout.minimumWidth:44
                         property string label:index===0?(stopwatch.running?'Pause':'Resume'):index===1?'On top':index===2?(view.completed?'Done':'Complete'):'Exit'
                         property string symbol:index===0?(stopwatch.running?'pause':'play'):index===1?'pin':index===2?'ok':'focus'
+                        readonly property bool selected:index===1&&app.focusOnTop
+                        readonly property color ink:!Theme.highContrast&&index===2&&view.completed?Theme.green:Theme.text
+                        leftPadding:4;rightPadding:4;topPadding:8;bottomPadding:8
                         Accessible.name:label;text:label
+                        Accessible.checkable:index===1;Accessible.checked:selected
                         enabled:index!==2||!view.completed;hoverEnabled:true
-                        background:ButtonGlass {control:action;selectorMaterial:true;backdrop:view.backdrop;selected:action.index===1&&app.focusOnTop||action.index===2&&view.completed}
-                        contentItem:Column {spacing:3
-                            Icon {name:action.symbol;anchors.horizontalCenter:parent.horizontalCenter;ink:action.index===2&&view.completed?Theme.green:Theme.text}
-                            Text {textFormat:Text.PlainText;text:action.label;anchors.horizontalCenter:parent.horizontalCenter;color:Theme.text;font.pixelSize:12}
+                        background:Rectangle {radius:20
+                            color:action.down?Theme.alpha(Theme.text,.12):action.selected?Theme.alpha(Theme.blue,.1):action.hovered?Theme.alpha(Theme.text,.06):'transparent'
+                            border.width:action.visualFocus?2:0;border.color:Theme.highContrast?Theme.text:Theme.blue
+                            Behavior on color {ColorAnimation {duration:Theme.motion?100:0}}
+                        }
+                        contentItem:Column {spacing:4;opacity:action.enabled?1:.55
+                            Icon {name:action.symbol;anchors.horizontalCenter:parent.horizontalCenter;width:20;height:20;ink:action.ink}
+                            Text {textFormat:Text.PlainText;text:action.label;width:parent.width;horizontalAlignment:Text.AlignHCenter;elide:Text.ElideRight;color:action.ink;font.pixelSize:12*Theme.textScale;font.weight:action.selected?Font.DemiBold:Font.Medium}
                         }
                         onClicked:{if(index===0)stopwatch.toggle();if(index===1){app.focusOnTop=!app.focusOnTop;app.show()}if(index===2&&tasks.change(view.taskId,'done',true))view.completed=true;if(index===3)view.leave()}
                     }

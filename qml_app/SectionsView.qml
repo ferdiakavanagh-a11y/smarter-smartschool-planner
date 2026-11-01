@@ -6,7 +6,6 @@ ListView {
     required property var app
     property var readNotes: ({})
     property bool topResetPending:false
-    property int entryFrames:0
     opacity:topResetPending?0:1
     property string gradeCourse:'All subjects'
     readonly property bool courseMenuVisible:headerItem?headerItem.courseMenuVisible:false
@@ -14,18 +13,20 @@ ListView {
         if(!visible||app.section<2||height<=0)return
         scrollMotion.stop();cancelFlick()
         if(headerItem)headerItem.forceLayout()
-        forceLayout();positionViewAtBeginning();app.headerCollapsed=false
+        forceLayout();app.headerCollapsed=false
+        let target=-1
         if(app.production&&(app.section===2||app.section===3)&&!app.searchText.trim()){
-            let today=Qt.formatDate(new Date(),'yyyy-MM-dd'),target=-1,lastDay=-1
+            let today=Qt.formatDate(new Date(),'yyyy-MM-dd'),lastDay=-1
             for(let i=0;i<model.length;i++)if(model[i].date&&(i===0||model[i].date!==model[i-1].date)){
                 lastDay=i
                 if(model[i].date>=today){target=i;break}
             }
             if(target<0)target=lastDay
-            if(target>=0)positionViewAtIndex(target,ListView.Center)
         }
+        if(target>=0)positionViewAtIndex(target,ListView.Center)
+        else positionViewAtBeginning()
     }
-    function requestTop(){topResetPending=true;entryFrames=0;app.headerCollapsed=false;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
+    function requestTop(){topResetPending=true;app.headerCollapsed=false;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
     onVisibleChanged:if(visible&&app.section>=2)requestTop()
     onHeightChanged:if(topResetPending&&height>0)Qt.callLater(resetTop)
     function flatten(groups){
@@ -66,15 +67,16 @@ ListView {
         }
         return flatten(groups)
     }
-    ScrollBar.vertical:ScrollBar{}
+    ScrollBar.vertical:ScrollBar{id:scrollBar;parent:view.parent;visible:view.visible;x:view.x+view.width-width-16;y:view.y;height:view.height}
     SmoothScroll {id:scrollMotion; view:view }
     Connections {target:app
         function onSectionChanged(){if(app.section>=2)view.requestTop()}
         function onSearchTextChanged(){if(view.visible)view.requestTop()}
         function onFixtureRevisionChanged(){view.readNotes={};if(app.production&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects';if(view.visible&&(app.section===2||app.section===3))view.requestTop()}
-        function onFrameSwapped(){if(view.topResetPending&&view.visible&&view.height>0){view.resetTop();if(++view.entryFrames>=2)view.topResetPending=false}}
+        function onAfterAnimating(){if(view.topResetPending&&view.visible&&view.height>0){app.settleHeader();view.resetTop();view.topResetPending=false}}
     }
-    onContentYChanged:if(view.visible&&!topResetPending)app.headerCollapsed=contentY-originY>80&&!app.searchOpen
+    onContentYChanged:if(view.visible&&!topResetPending&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=contentY-originY>80&&!app.searchOpen
+    Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){view.positionViewAtIndex(view.currentIndex,ListView.Contain);Qt.callLater(function(){if(!view.topResetPending)app.headerCollapsed=view.contentY-view.originY>80&&!app.searchOpen})}}
     header:Column {
         readonly property bool courseMenuVisible:gradePicker.popup.visible
         x:16;width:view.width-32;spacing:10

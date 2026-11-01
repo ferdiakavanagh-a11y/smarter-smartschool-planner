@@ -41,7 +41,7 @@ ComboBox {
         readonly property real expandedWidth:Math.max(picker.width,190*Theme.textScale)
         readonly property real expandedHeight:Math.min(240,contentItem.implicitHeight+12)
         y:0;width:picker.width+(expandedWidth-picker.width)*reveal;height:picker.height+(expandedHeight-picker.height)*reveal
-        padding: 6; focus:true; popupType:Popup.Item
+        padding: 6; popupType:Popup.Item
         onAboutToShow:if(!animate)reveal=1
         onClosed:{reveal=0;picker.pointerMotion=false}
         background: Item {
