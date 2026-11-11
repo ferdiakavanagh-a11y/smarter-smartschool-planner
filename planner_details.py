@@ -16,13 +16,13 @@ from windows_security import atomic_bytes
 
 # placeholders: {id} element UUID, {platform_id}/{user_id}, {type} e.g. "planned-assignments", {date}
 CANDIDATE_TEMPLATES = [
-    # the library calls /lesson-content/api/v1/assignments/..., so text likely lives there
+    # Try the verified planner route before legacy guesses that can deny access.
+    "/planner/api/v1/{type}/{platform_id}/{id}",
     "/lesson-content/api/v1/assignments/{platform_id}/{id}",
     "/lesson-content/api/v1/assignments/{id}",
     "/lesson-content/api/v1/assignments/{platform_id}/{id}/details",
     "/lesson-content/api/v1/planned-assignments/{platform_id}/{id}",
     "/lesson-content/api/v1/planned-assignments/{id}",
-    "/planner/api/v1/planned-assignments/{platform_id}/{id}",
     "/planner/api/v1/planned-assignments/{id}",
     "/planner/api/v1/planned-elements/{platform_id}/{id}",
     "/planner/api/v1/planned-elements/{id}",
@@ -31,7 +31,7 @@ CANDIDATE_TEMPLATES = [
 
 # keys likely holding task text
 # bump when CANDIDATE_TEMPLATES changes so an old "nothing worked" result is retried
-PROBE_VERSION = 3
+PROBE_VERSION = 4
 
 
 def failure_kind(exc: Exception) -> str:
@@ -347,8 +347,8 @@ class DetailFetcher:
             if payload is None and self._last_failure not in ('transient', 'deferred', 'denied') and self.route_is_saved and not self.custom_template and not self._probed_this_run:
                 self.template = None
                 self.route_is_saved = False
-        if payload is None and not self.template and not self.custom_template and element_type == "planned-assignments":
-            # no route yet: probe on an assignment
+        if payload is None and not self.template and not self.custom_template and element_type in ("planned-assignments", "planned-to-dos"):
+            # Both task types returned by the planner need fresh-install discovery.
             self._probed_this_run = True
             for candidate in CANDIDATE_TEMPLATES:
                 payload = self._get(candidate, ctx)
