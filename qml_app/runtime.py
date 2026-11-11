@@ -37,10 +37,12 @@ def main():
     from PySide6.QtGui import QGuiApplication, QIcon
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuickControls2 import QQuickStyle
+    from PySide6.QtWebEngineQuick import QtWebEngineQuick
     from .backend import Backend
     from .model import Stopwatch
     from .main import round_window
     QQuickStyle.setStyle('Basic')
+    QtWebEngineQuick.initialize()
     application = QGuiApplication(sys.argv)
     application.setApplicationName('Smartschool Planner')
     resources = Path(getattr(sys, '_MEIPASS', root))

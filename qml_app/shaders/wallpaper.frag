@@ -5,6 +5,7 @@ layout(std140,binding=0) uniform buf {
     mat4 qt_Matrix; float qt_Opacity; float phase;
     vec4 base; vec4 blue; vec4 purple; vec4 teal; vec4 warm; vec4 pink; float dark;
     float preset;
+    float aspect;
 };
 float blob(vec2 p,vec2 c,float radius){vec2 d=(p-c)/radius;return exp(-dot(d,d)*2.8);}
 vec3 pigment(vec3 color){return mix(mix(base.rgb,color,.57),color*.24+base.rgb*.65,dark);}
@@ -42,7 +43,7 @@ void main(){
     }else{
         vec2 q=p+vec2(sin(phase),cos(phase)-1.0)*.012;
         if(preset<.5){
-            // Satin: quiet indigo sheets converging below the lower-left corner.
+            // Silk: quiet indigo sheets converging below the lower-left corner.
             vec3 body=mix(vec3(.52,.62,.76),vec3(.065,.074,.13),dark);
             vec3 light=mix(vec3(.96,.98,1.0),vec3(.28,.31,.47),dark);
             c=mix(vec3(.85,.90,.96),vec3(.045,.048,.085),dark);
@@ -51,24 +52,35 @@ void main(){
             c=fold(c,q.x-((1.0-q.y)*.83+bend),body*.84,light*.88,.24);
             c=fold(c,q.x-((1.0-q.y)*1.55+bend),body*.94,light,.27);
         }else if(preset<2.5){
-            // Tide: translucent blue crests, with a pale horizon in light mode.
-            c=mix(mix(vec3(.37,.72,.91),vec3(.92,.94,.84),smoothstep(.0,.75,q.y)),
-                  mix(vec3(.025,.08,.16),vec3(.055,.17,.23),q.y),dark);
-            vec3 body=mix(vec3(.29,.58,.80),vec3(.025,.085,.17),dark);
-            vec3 light=mix(vec3(.82,.98,1.0),vec3(.10,.36,.49),dark);
-            float wave=.60-.24*q.x+.13*sin(q.x*4.0-.55);
-            c=fold(c,q.y-wave,body,light,.19);
-            c=fold(c,q.y-(wave+.22+.09*cos(q.x*3.0)),body*.86,light*.83,.15);
-            c=fold(c,q.y-(.98-.32*q.x+.12*sin(q.x*4.0+1.0)),body*.96,light,.14);
+            // Aurora: a sculpted luminous veil, with a quiet corner behind the heading.
+            c=mix(mix(vec3(.86,.94,.96),vec3(.96,.98,.96),q.y),
+                  mix(vec3(.012,.035,.075),vec3(.018,.055,.09),q.y),dark);
+            float sweep=q.x-.32-.74*q.y+.28*q.y*q.y+.10*sin(q.y*3.6+.2);
+            float veil=smoothstep(-.46,-.12,sweep)*(1.0-smoothstep(.28,.64,sweep));
+            vec3 mint=mix(vec3(.64,.83,.88),vec3(.025,.14,.21),dark);
+            vec3 azure=mix(vec3(.62,.76,.94),vec3(.05,.29,.42),dark);
+            vec3 rim=mix(vec3(.94,1.0,.98),vec3(.14,.52,.56),dark);
+            c=mix(c,mint,veil*.88);
+            c=mix(c,azure,exp(-pow((sweep-.08)/.20,2.0))*.52);
+            c=mix(c,rim,exp(-pow((sweep+.17)/.045,2.0))*.37);
+            c=mix(c,mix(vec3(1.0,.91,.84),vec3(.18,.10,.13),dark),
+                  exp(-pow((sweep-.52)/.14,2.0))*.18*smoothstep(.25,.95,q.y));
         }else{
-            // Dunes: warm pearl and mauve, lit like a softly folded sheet.
-            c=mix(vec3(.93,.87,.85),vec3(.085,.061,.10),dark);
-            vec3 body=mix(vec3(.76,.62,.65),vec3(.12,.075,.135),dark);
-            vec3 light=mix(vec3(1.0,.96,.86),vec3(.36,.22,.32),dark);
-            float sweep=q.y+.42*q.x+.15*sin(q.x*3.3);
-            c=fold(c,sweep-.46,body,light,.24);
-            c=fold(c,sweep-.83,body*.90,light*.92,.25);
-            c=fold(c,sweep-1.20,body*.86,light,.21);
+            // Contour: broad frosted material, with gentle depth rather than graphic rings.
+            c=mix(mix(vec3(.91,.94,.95),vec3(.80,.86,.89),q.y),
+                  mix(vec3(.025,.035,.055),vec3(.045,.07,.09),q.y),dark);
+            float bend=.20+.47*q.y+.13*sin(q.y*3.3-.25);
+            float seam=q.x-bend;
+            float face=smoothstep(-.012,.020,seam);
+            vec3 body=mix(vec3(.76,.83,.86),vec3(.045,.075,.10),dark);
+            vec3 pearl=mix(vec3(.98,.99,.98),vec3(.20,.29,.33),dark);
+            c*=1.0-.12*exp(-abs(seam)/.035)*(1.0-face);
+            vec3 frost=mix(body,pearl,exp(-max(seam,0.0)/.20)*.74);
+            c=mix(c,frost,face*.88);
+            c+=pearl*exp(-pow(seam/.018,2.0))*.028;
+            float lower=q.y-(.84-.12*q.x+.025*sin(q.x*min(aspect,1.8)*3.0));
+            c=mix(c,mix(vec3(.80,.85,.84),vec3(.055,.09,.105),dark),
+                  smoothstep(-.035,.15,lower)*.48);
         }
         // Static sub-pixel dither prevents banding without visible texture or temporal noise.
         float noise=fract(sin(dot(floor(p*vec2(1200,800)),vec2(12.9898,78.233)))*43758.5453)-.5;

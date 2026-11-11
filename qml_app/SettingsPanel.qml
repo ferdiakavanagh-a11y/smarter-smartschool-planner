@@ -25,7 +25,7 @@ Sheet {
         Label {textFormat:Text.PlainText;text:'None';color:Theme.secondary} Item {Layout.fillWidth:true} Label {textFormat:Text.PlainText;text:Math.round(Theme.refractionLevel*100)+'%';color:Theme.secondary} Item {Layout.fillWidth:true} Label {textFormat:Text.PlainText;text:'Strong';color:Theme.secondary}
     }
     Label {textFormat:Text.PlainText; text: 'BACKGROUND'; color: Theme.secondary; font.pixelSize: 13; font.bold: true }
-    GlassComboBox { objectName: 'backgroundPicker'; Layout.fillWidth:true; model:['Satin','Soft colours','Tide','Dunes']; currentIndex:Theme.wallpaperIndex; Accessible.name:'Background'; onActivated:Theme.wallpaperIndex=currentIndex }
+    GlassComboBox { objectName: 'backgroundPicker'; Layout.fillWidth:true; model:['Silk','Soft colours','Aurora','Contour']; currentIndex:Theme.wallpaperIndex; Accessible.name:'Background'; onActivated:Theme.wallpaperIndex=currentIndex }
     Label {textFormat:Text.PlainText; text: 'TEXT SIZE'; color: Theme.secondary; font.pixelSize: 13; font.bold: true }
     LensBar { Layout.fillWidth: true; backdrop: panel.backdrop; labels: ['Small','Default','Large','135%']; current: Theme.textScale<1?0:Theme.textScale<1.1?1:Theme.textScale<1.3?2:3; onPicked: i => Theme.textScale=[.9,1,1.15,1.35][i] }
     Label {textFormat:Text.PlainText; text: 'ACCESSIBILITY'; color: Theme.secondary; font.pixelSize: 13; font.bold: true }
@@ -47,6 +47,7 @@ Sheet {
         text:dateToggle.checked?'Gemini checks assignment dates during sync. Verify dates marked with the sparkle icon.':app.production&&backend.checkerState.geminiAvailable?'Local date checking. Turn on to use Gemini during sync.':'Local date checking. Add a Gemini API key in login details to enable AI.'
     }
     Label {textFormat:Text.PlainText;visible:app.production;text:'ACCOUNT';color:Theme.secondary;font.bold:true}
+    Capsule {objectName:'offlineFilesButton';visible:app.production;text:'Offline files';symbol:'file';onClicked:app.showOfflineFiles()}
     Label {textFormat:Text.PlainText;visible:app.production;text:app.production?backend.school:'';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
     Capsule {visible:app.production;text:'Change login details';enabled:!app.busy;onClicked:app.changeAccount()}
     Capsule {visible:app.production;text:'Copy sync diagnostics';onClicked:if(backend.copyDiagnostics())app.notify('Diagnostics copied')}

@@ -17,10 +17,12 @@ Item {
     property color pink: Theme.pink
     property real dark: Theme.dark ? 1 : 0
     property real preset: Theme.wallpaperIndex
+    property real aspect: width/Math.max(1,height)
     fragmentShader: "shaders/wallpaper.frag.qsb"
     NumberAnimation on phase {
+        objectName:'wallpaperAnimation'
         from: 0; to: Math.PI * 2; duration: Theme.clear ? 80000 : 52000
-        loops: Animation.Infinite; running: wallpaper.animate && Theme.active
+        loops: Animation.Infinite; running: wallpaper.animate && Theme.active && !Theme.reducedMotion
     }
 }
 }

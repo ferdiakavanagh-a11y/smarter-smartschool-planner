@@ -25,8 +25,8 @@ class Tasks(QAbstractListModel):
         self.filters = ('', 'All courses', 'All types', False)
         self.section = 0
         self.completed_open = False
+        self.overdue_open = False
         self.undo_change = None
-        self._feedback_task_id = None
         self.filter(*self.filters)
 
     def roleNames(self):
@@ -58,9 +58,31 @@ class Tasks(QAbstractListModel):
     def completedIds(self):
         return [t['taskId'] for t in self.all if t['done']]
 
+    @Property('QVariantList', notify=countChanged)
+    def completedTasks(self):
+        return [dict(t) for t in sorted(self.all, key=lambda t:(t['due'],t['taskId']), reverse=True) if t['done']]
+
+    @Property('QVariantList', notify=countChanged)
+    def missedTasks(self):
+        return [dict(t) for t in sorted(self.all, key=lambda t:(t['due'],t['taskId']))
+                if not t['done'] and t['due'] < self.today.isoformat()]
+
     @Property(int, notify=countChanged)
     def missedCount(self):
         return sum(not t['done'] and -7 <= (date.fromisoformat(t['due'])-self.today).days < 0 for t in self.all)
+
+    @Property(int, notify=countChanged)
+    def overdueCount(self):
+        return sum(not t['done'] and t['due'] < self.today.isoformat() for t in self.all)
+
+    @Property(bool, notify=countChanged)
+    def overdueExpanded(self):
+        return self.overdue_open
+
+    @Slot(bool)
+    def expandOverdue(self, value):
+        self.overdue_open = value
+        self.filter(*self.filters)
 
     @Property('QVariantList', notify=countChanged)
     def week(self):
@@ -136,20 +158,22 @@ class Tasks(QAbstractListModel):
                      and (course == 'All courses' or t['course'] == course)
                      and (kind == 'All types' or t['kind'] == kind)
                      and (not pins or t['pinned'])]
-        for t in rows:
-            days = (date.fromisoformat(t['due'])-self.today).days
-            t['group'] = 'Completed' if t['done'] else 'Pinned' if t['pinned'] else 'Last 7 days' if days < 0 else 'Today' if days == 0 else 'Tomorrow' if days == 1 else 'This week' if days < 7 else 'Later'
         if self.section == 1:
             rows = [t for t in rows if not t['done'] and -7 <= (date.fromisoformat(t['due'])-self.today).days < 0]
         else:
-            rows = [t for t in rows if t['group'] != 'Last 7 days' and (not t['done'] or self.completed_open or query)]
-        order = ['Pinned','Last 7 days','Today','Tomorrow','This week','Later','Completed']
+            rows = [t for t in rows if (t['done'] or t['due'] >= self.today.isoformat() or self.overdue_open) and (not t['done'] or self.completed_open)]
+        # Removed rows keep their old section while Qt paints the exit transition.
+        for t in rows:
+            days = (date.fromisoformat(t['due'])-self.today).days
+            t['group'] = 'Completed' if t['done'] else 'Overdue' if days < 0 else 'Pinned' if t['pinned'] else 'Today' if days == 0 else 'Tomorrow' if days == 1 else 'This week' if days < 7 else 'Later'
+        order = ['Overdue','Pinned','Today','Tomorrow','This week','Later','Completed']
         rows.sort(key=lambda t:(order.index(t['group']),t['due'],t['taskId']))
         # Preserve Qt's visible delegates and scroll anchor when local edits change the list.
         old_ids = [t['taskId'] for t in self.rows]
         new_ids = [t['taskId'] for t in rows]
-        kept = {index for block in SequenceMatcher(None, old_ids, new_ids, autojunk=False).get_matching_blocks()
-                for index in range(block.a, block.a+block.size)}
+        kept = set(range(len(old_ids))) if old_ids == new_ids else {
+            index for block in SequenceMatcher(None, old_ids, new_ids, autojunk=False).get_matching_blocks()
+            for index in range(block.a, block.a+block.size)}
         for index in range(len(self.rows)-1, -1, -1):
             if index not in kept:
                 self.beginRemoveRows(QModelIndex(), index, index)
@@ -187,42 +211,15 @@ class Tasks(QAbstractListModel):
             return True
         self.undo_change = task_id, field, task[field]
         task[field] = value
-        hides_done = self.section == 1 or not (self.completed_open or self.filters[0].strip())
-        if field == 'done' and value and hides_done and task in self.rows:
+        if field == 'done' and task in self.rows:
             row = self.rows.index(task)
             self.dataChanged.emit(self.index(row), self.index(row), [Qt.UserRole+self.fields.index('done')])
-            if self._feedback_task_id == task_id:
-                self.countChanged.emit()
-            else:
-                self._retire_completed(task_id)
-        else:
-            self.filter(*self.filters)
+        self.filter(*self.filters)
         return True
 
     @Slot(str, result=bool)
     def complete(self, task_id):
-        self._feedback_task_id = task_id
-        try:
-            saved = self.change(task_id, 'done', True)
-        finally:
-            self._feedback_task_id = None
-        if saved:
-            # Retire only the presentation row; the state is already saved.
-            QTimer.singleShot(600, self, lambda: self._retire_completed(task_id))
-        return saved
-
-    def _retire_completed(self, task_id):
-        task = next((t for t in self.rows if t['taskId'] == task_id and t['done']), None)
-        if task is None or (self.section != 1 and (self.completed_open or self.filters[0].strip())):
-            return
-        row = self.rows.index(task)
-        self.beginRemoveRows(QModelIndex(), row, row)
-        del self.rows[row]
-        self.endRemoveRows()
-        if self.rows:
-            self.dataChanged.emit(self.index(max(0,row-1)), self.index(min(row,len(self.rows)-1)),
-                                  [Qt.UserRole+self.fields.index(key) for key in ('first','last')])
-        self.countChanged.emit()
+        return self.change(task_id, 'done', True)
 
     @Slot(result=bool)
     def undo(self):

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import re
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,6 +17,8 @@ import credential_store
 import task_state
 from .production_model import PlannerTasks, text, fields_text, planner_url, written_date, task_indicators
 from .task_details import instruction_sections
+from .feature_backend import SchoolFeatures
+from . import feature_state
 
 
 def log_error(root, info):
@@ -54,8 +56,16 @@ class Backend(QObject):
         self.sync_after_choice = False
         self.tasks = PlannerTasks(self.root, self.verify_account)
         self.tasks.failed.connect(self.error)
+        self._groups_cache = {}
+        self.groupsChanged.connect(self._invalidate_groups)
+        self.tasks.countChanged.connect(self._invalidate_task_groups)
+        self._features = SchoolFeatures(self)
         self._finished.connect(self._receive, Qt.QueuedConnection)
         self.reload()
+
+    @Property(QObject, constant=True)
+    def features(self):
+        return self._features
 
     def account(self):
         return credential_store.account_key(credential_store.load_credentials(self.root/'credentials.yml'))
@@ -107,7 +117,13 @@ class Backend(QObject):
             self._status = 'Not synced yet · use Sync to load your planner'
         except Exception:
             self._status = 'Saved planner unavailable · check login details and sync again'
+        if self.data.get('account_key'):
+            try:
+                self.data.setdefault('todos', []).extend(feature_state.load(self.root, self.data['account_key']).get('tasks', []))
+            except (OSError, ValueError):
+                self.error.emit('Local tasks could not be read. Existing files were kept.')
         self.tasks.replace(self.data)
+        self._features.reset()
         self.groupsChanged.emit(-1)
         self.changed.emit()
 
@@ -187,6 +203,13 @@ class Backend(QObject):
         if self._closed:
             return
         self._jobs.discard(name)
+        if name.startswith('feature:'):
+            try:
+                self._features.receive(name[8:], result, failure)
+            except Exception:
+                self.error.emit('The school request expired or could not be saved. Please retry.')
+            self.changed.emit()
+            return
         if failure is not None:
             import app_errors
             info = app_errors.explain(failure, app_errors.read_main_url(self.root/'credentials.yml'))
@@ -363,10 +386,11 @@ class Backend(QObject):
                  [('Course', item.get('course')), ('Type', item.get('type')), ('Posted', written_date(item.get('posted_date'))), ('Due', written_date(item.get('due_date')))] if value]
         metadata = fields_text([(fact['label'], fact['value']) for fact in facts])
         body = text(item.get('body'))
-        links = list(item.get('attachments') or [])+list(item.get('weblinks') or [])
-        if self.school:
+        links = [dict(a, downloadable=bool(a.get('url'))) for a in item.get('attachments') or []]
+        links += [dict(a, downloadable=False) for a in item.get('weblinks') or []]
+        if self.school and not item.get('message_id'):
             links.append(dict(name='Open in Smartschool', url=planner_url(self.data, item, item.get('posted_date'))))
-        return dict(body=body, sections=instruction_sections(item), facts=facts, metadata=metadata, status=flags, links=links)
+        return dict(body=body, sections=instruction_sections(item), facts=facts, metadata=metadata, status=flags, links=links, messageId=item.get('message_id', ''))
 
     @Slot(str, result=str)
     def taskBadges(self, task_id):
@@ -386,7 +410,31 @@ class Backend(QObject):
     @Slot(int, str, str, result='QVariantList')
     def groups(self, section, query, course='All subjects'):
         from .sections import groups
-        return groups(self, section, query, course)
+        if section not in (2, 3, 4, 5):
+            return []
+        collection = self.data.get({2:'days', 3:'all_classes', 4:'results', 5:'lvs'}.get(section, ''))
+        # Snapshot dictionaries can also be updated in place by local actions.
+        content = repr((collection, self.data.get('days'))) if section == 3 else repr(collection)
+        tasks = repr([(t['taskId'], t['title'], t['kind'], t['due'], t['done']) for t in self.tasks.all]) if section in (2, 3) else ''
+        read = repr(self._settings.get(self.read_key(), [])) if section == 5 else ''
+        key = (id(self.data), date.today(), query, course, self.features.selectedPeriod, content, tasks, read)
+        cached = self._groups_cache.get(section)
+        if cached is None or cached[0] != key:
+            cached = key, groups(self, section, query, course)
+            self._groups_cache[section] = cached
+        return cached[1]
+
+    @Slot(int)
+    def _invalidate_groups(self, section):
+        if section == -1:
+            self._groups_cache.clear()
+        else:
+            self._groups_cache.pop(section, None)
+
+    @Slot()
+    def _invalidate_task_groups(self):
+        self._groups_cache.pop(2, None)
+        self._groups_cache.pop(3, None)
 
     @Slot(str)
     def openNote(self, note_id):

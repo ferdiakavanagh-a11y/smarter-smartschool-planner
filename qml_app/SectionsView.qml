@@ -26,9 +26,8 @@ ListView {
         if(target>=0)positionViewAtIndex(target,ListView.Center)
         else positionViewAtBeginning()
     }
-    function requestTop(){topResetPending=true;app.headerCollapsed=false;scrollMotion.stop();cancelFlick();Qt.callLater(resetTop)}
+    function requestTop(){topResetPending=true;app.headerCollapsed=false;scrollMotion.stop();cancelFlick()}
     onVisibleChanged:if(visible&&app.section>=2)requestTop()
-    onHeightChanged:if(topResetPending&&height>0)Qt.callLater(resetTop)
     function flatten(groups){
         let rows=[]
         for(let group of groups)for(let i=0;i<group.items.length;i++)
@@ -75,22 +74,29 @@ ListView {
         function onFixtureRevisionChanged(){view.readNotes={};if(app.production&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects';if(view.visible&&(app.section===2||app.section===3))view.requestTop()}
         function onAfterAnimating(){if(view.topResetPending&&view.visible&&view.height>0){app.settleHeader();view.resetTop();view.topResetPending=false}}
     }
-    onContentYChanged:if(view.visible&&!topResetPending&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=contentY-originY>80&&!app.searchOpen
-    Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){view.positionViewAtIndex(view.currentIndex,ListView.Contain);Qt.callLater(function(){if(!view.topResetPending)app.headerCollapsed=view.contentY-view.originY>80&&!app.searchOpen})}}
+    onContentYChanged:if(view.visible&&!topResetPending&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=app.section!==3&&contentY-originY>80&&!app.searchOpen
+    Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){view.positionViewAtIndex(view.currentIndex,ListView.Contain);Qt.callLater(function(){if(!view.topResetPending)app.headerCollapsed=app.section!==3&&view.contentY-view.originY>80&&!app.searchOpen})}}
     header:Column {
         readonly property bool courseMenuVisible:gradePicker.popup.visible
         x:16;width:view.width-32;spacing:10
-        Item {id:gradeSlot;visible:app.section===4&&app.production;width:parent.width;height:visible?48:0
+        Item {id:gradeSlot;visible:app.section===4&&app.production;width:parent.width;height:visible?Math.max(48,gradeReports.height):0
             GlassComboBox {id:gradePicker;objectName:'gradeCourseFilter';parent:app.controlsLayer
                 readonly property point origin:app.controlPosition(gradeSlot)
                 x:origin.x;y:origin.y;visible:gradeSlot.visible&&view.visible&&!app.focusOpen&&origin.y>=app.controlPosition(view).y-1
-                width:Math.min(gradeSlot.width,Math.max(160,implicitContentWidth+46)*Theme.textScale);height:40
+                width:Math.min(gradeSlot.width-gradeReports.width-12,Math.max(160,implicitContentWidth+46)*Theme.textScale);height:40
                 selectorMaterial:true;backdrop:app.controlsBackdrop
                 model:app.production?backend.gradeCourses:[];currentIndex:Math.max(0,model.indexOf(view.gradeCourse));Accessible.name:'Filter grades by subject'
                 onActivated:{view.gradeCourse=currentText;view.requestTop()}
             }
+            Capsule {id:gradeReports;objectName:'reportCardsButton';parent:app.controlsLayer
+                readonly property point origin:app.controlPosition(gradeSlot)
+                x:origin.x+gradeSlot.width-width;y:origin.y
+                visible:gradeSlot.visible&&view.visible&&!app.focusOpen&&origin.y>=app.controlPosition(view).y-1
+                text:'Report cards';symbol:'file';onClicked:app.showReports()
+            }
         }
         Label {textFormat:Text.PlainText;visible:app.section===5;text:app.production?'This school year':'This school year · Synthetic workspace';color:Theme.secondary;padding:8}
+        Capsule {visible:app.section===4&&app.production&&backend.features.selectedPeriod!=='';text:app.production?'Period: '+backend.features.selectedPeriod+' · Clear':'';onClicked:backend.features.selectPeriod('')}
         Capsule {objectName:'markAllRead';visible:app.section===5;text:'Mark all as read';onClicked:{if(app.production){backend.markRead('*');return}let next={};for(let i=0;i<8;i++)next['lvs-'+i]=true;view.readNotes=next}}
     }
     delegate:Column {

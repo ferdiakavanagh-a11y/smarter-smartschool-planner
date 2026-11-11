@@ -8,6 +8,7 @@ Item {
     property var symbols: []
     property int missedCount: 0
     property int unreadCount: 0
+    property int unreadIndex: 5
     property int current: 0
     property bool fancy: Theme.fancy
     property bool motion: Theme.motion
@@ -65,7 +66,7 @@ Item {
                         color: tab.index===bar.current || tab.hovered ? Theme.text : Theme.secondary; font.weight: Font.DemiBold }
                 }
                 onClicked: bar.picked(index)
-                Rectangle {objectName:'tabBadge';property int count:tab.index===1?bar.missedCount:tab.index===5?bar.unreadCount:0
+                Rectangle {objectName:'tabBadge';property int count:tab.index===1?bar.missedCount:tab.index===bar.unreadIndex?bar.unreadCount:0
                     visible:count>0;width:Math.max(20,countLabel.implicitWidth+10);height:20;radius:10;x:parent.width/2+8;y:0;color:'#c9322b'
                     Text {id:countLabel;textFormat:Text.PlainText;anchors.centerIn:parent;text:parent.count>99?'99+':parent.count;color:'white';font.pixelSize:12;font.bold:true} }
                 Keys.onReturnPressed: bar.picked(index)

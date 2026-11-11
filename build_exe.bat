@@ -47,6 +47,8 @@ REM Always regenerate the spec: an old one may still request a one-file bundle.
         --hidden-import=PySide6.QtQml ^
         --hidden-import=PySide6.QtQuick ^
         --hidden-import=PySide6.QtQuickControls2 ^
+        --hidden-import=PySide6.QtWebEngineQuick ^
+        --hidden-import=PySide6.QtPdf ^
         --collect-all google.genai ^
         --collect-all google.auth ^
         --collect-all httpx ^

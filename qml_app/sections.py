@@ -1,6 +1,7 @@
 """Presentation rows for the unchanged sync snapshot format."""
 from collections import defaultdict
 from datetime import date
+from functools import cache
 import math
 import re
 from .production_model import text, fields_text, planner_url, written_date
@@ -56,13 +57,46 @@ def row(key, title, meta='', body='', extra='', **values):
     return dict(id=str(key), title=text(title), meta=text(meta), body=text(body), extra=text(extra), links=[], assignments=[], **values)
 
 
+def planner_days(data):
+    days = {}
+    for source in ('all_classes', 'days'):
+        for day in data.get(source, []):
+            events = days.setdefault(day.get('date', ''), {})
+            for event in day.get('events', []):
+                key = str(event.get('moment_id') or '') or tuple(str(event.get(k) or '') for k in ('start', 'end', 'course', 'classroom'))
+                if key not in events:
+                    events[key] = dict(event)
+                    continue
+                old = events[key]
+                info = dict(old.get('info') or {})
+                extra = event.get('info') or {}
+                assignments = list(info.get('assignments') or [])
+                for assignment in extra.get('assignments') or []:
+                    if not any(a.get('id') == assignment.get('id') for a in assignments):
+                        assignments.append(assignment)
+                info.update({k:v for k,v in extra.items() if v and k != 'assignments'})
+                info['assignments'] = assignments
+                merged = dict(event)
+                merged.update({k:v for k,v in old.items() if v or k not in merged})
+                for field in ('attachments', 'weblinks'):
+                    links = list(old.get(field) or [])
+                    links.extend(link for link in event.get(field) or [] if link not in links)
+                    merged[field] = links
+                events[key] = dict(merged, info=info)
+    return [dict(date=day, events=sorted(events.values(), key=lambda event:str(event.get('start') or ''))) for day,events in days.items()]
+
+
 def groups(backend, section, query, course='All subjects'):
+    cached_date = cache(written_date)
+    def format_date(value, full=False):
+        return cached_date(value, full) if isinstance(value, str) else written_date(value, full)
     data, query = backend.data, query.casefold().strip()
     matches = lambda item: not query or query in ' '.join(str(item.get(k) or '') for k in ('title', 'meta', 'body', 'extra')).casefold()
     output = []
     if section in (2, 3):
         tasks = {task['taskId']: task for task in backend.tasks.all}
-        for day in sorted(data.get('days' if section == 2 else 'all_classes', []), key=lambda day: str(day.get('date') or '')):
+        days = data.get('days', []) if section == 2 else planner_days(data)
+        for day in sorted(days, key=lambda day: str(day.get('date') or '')):
             items = []
             for event in day.get('events', []):
                 info = event.get('info') or {}
@@ -77,11 +111,12 @@ def groups(backend, section, query, course='All subjects'):
                         continue
                     task = tasks.get(task_id, {})
                     due = task.get('due') or assignment.get('due_date') or ''
-                    due_text = 'Today' if due == date.today().isoformat() else written_date(due)
+                    due_text = 'Today' if due == date.today().isoformat() else format_date(due)
                     item['assignments'].append(dict(id=task_id, title=task.get('title') or text(assignment.get('description')),
                                                     kind=task.get('kind') or text(assignment.get('type')), due=due_text,
                                                     done=task.get('done', False), editable=bool(task)))
-                item['links'] = list(event.get('attachments') or [])+list(event.get('weblinks') or [])
+                item['links'] = [dict(a,downloadable=bool(a.get('url'))) for a in event.get('attachments') or []]
+                item['links'] += [dict(a,downloadable=False) for a in event.get('weblinks') or []]
                 link = planner_url(data, event, day.get('date'))
                 if link:
                     item['links'].append(dict(name='Open lesson in Smartschool', url=link))
@@ -90,16 +125,19 @@ def groups(backend, section, query, course='All subjects'):
                 if matches(item):
                     items.append(item)
             if items or not query:
-                output.append(dict(date=str(day.get('date') or '')[:10], heading=written_date(day.get('date'), full=True), items=items or [row('', 'No lessons scheduled', kind='empty')]))
+                output.append(dict(date=str(day.get('date') or '')[:10], heading=format_date(day.get('date'), full=True), items=items or [row('', 'No lessons scheduled', kind='empty')]))
     elif section == 4:
         by_course = defaultdict(list)
         for result in data.get('results', []):
+            period = getattr(getattr(backend, 'features', None), 'selectedPeriod', '')
+            if period and text(result.get('period')) != period:
+                continue
             if course != 'All subjects' and text(result.get('course')) != course:
                 continue
             score, maximum = result.get('score'), result.get('max')
             presentation, numeric = grade_presentation(result)
             body = fields_text([(k, result.get(v)) for k, v in [('Course', 'course'), ('Date', 'date'), ('Teacher', 'teacher'), ('Period', 'period')]])+'\n\n'+presentation['extra']+'\n\n'+'\n\n'.join(text(v) for v in result.get('feedback') or [])
-            meta = ' · '.join(filter(None, [written_date(result.get('date')), '' if result.get('counts') else 'Doesn’t count']))
+            meta = ' · '.join(filter(None, [format_date(result.get('date')), '' if result.get('counts') else 'Doesn’t count']))
             item = row(result.get('id'), result.get('name') or 'Evaluation', meta, body, kind='grade')
             item.update(presentation)
             if matches(item):
@@ -121,7 +159,7 @@ def groups(backend, section, query, course='All subjects'):
             for source in lvs.get(kind, []):
                 token = kind+':'+str(source.get('id') or '')
                 item = row(token, source.get('title') or source.get('description') or source.get('subject') or ('Note' if kind == 'notes' else 'Absence'),
-                           ' · '.join(written_date(source.get(k)) if k == 'date' else text(source.get(k)) for k in ('date', 'category', 'author', 'part') if source.get(k)),
+                           ' · '.join(format_date(source.get(k)) if k == 'date' else text(source.get(k)) for k in ('date', 'category', 'author', 'part') if source.get(k)),
                            fields_text(source), kind=kind, unread=token not in read)
                 if matches(item):
                     items.append(item)

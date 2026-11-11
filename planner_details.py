@@ -107,10 +107,15 @@ def flatten_json(obj, prefix: str = "") -> list[tuple[str, str]]:
     return out
 
 
+_INLINE_SPACES = re.compile(r"[ \t]{2,}")
+
+
 def html_to_text(value: str) -> str:
     """HTML description -> plain text; keeps paragraph breaks, not inline-tag splits."""
     if not value:
         return ""
+    if value.isprintable() and '<' not in value and '&' not in value and '\xa0' not in value and '  ' not in value:
+        return value.strip()
     text = value
     if _TAG_RE.search(value):
         try:
@@ -138,7 +143,7 @@ def html_to_text(value: str) -> str:
                 out.append("")
         else:
             blank = 0
-            out.append(re.sub(r"[ \t]{2,}", " ", line))
+            out.append(_INLINE_SPACES.sub(" ", line))
     return "\n".join(out).strip()
 
 
