@@ -13,7 +13,7 @@ MAX_DRAFTS = 200
 MAX_STORAGE_BYTES = 25 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 _FIELDS = {'id', 'subject', 'body', 'mode', 'sourceId', 'sourceFolder', 'recipients',
-           'attachments', 'updatedAt', 'deliveryState', 'attemptSnapshot'}
+           'attachments', 'updatedAt', 'deliveryState', 'attemptSnapshot', 'bodyHtml', 'scheduleAt'}
 
 
 def _path(root, account):
@@ -38,6 +38,12 @@ def _validate(draft):
         raise ValueError('Invalid message draft identifier.')
     _text(draft['subject'], 300)
     _text(draft['body'], 100_000)
+    _text(draft['bodyHtml'], 500_000)
+    schedule = _text(draft['scheduleAt'], 40)
+    if schedule:
+        stamp = datetime.fromisoformat(schedule)
+        if stamp.tzinfo is None or stamp.isoformat(timespec='seconds') != schedule:
+            raise ValueError('Invalid scheduled message time.')
     if draft['mode'] not in ('new', 'reply', 'replyAll', 'forward'):
         raise ValueError('Invalid message draft mode.')
     if draft['sourceId'] and not re.fullmatch('[0-9]{1,20}', _text(draft['sourceId'], 20)):
@@ -108,6 +114,9 @@ def load(root, account):
         raise ValueError('Invalid saved drafts. Existing drafts were kept.')
     identities = set()
     for draft in data['drafts']:
+        if isinstance(draft, dict):
+            draft.setdefault('bodyHtml', '')
+            draft.setdefault('scheduleAt', '')
         _validate(draft)
         if draft['id'] in identities:
             raise ValueError('Duplicate saved draft identifiers.')
@@ -131,7 +140,7 @@ def save(root, account, draft):
     if not isinstance(value, dict) or set(value) - _FIELDS:
         raise ValueError('Invalid message draft fields.')
     value.setdefault('id', uuid.uuid4().hex)
-    for key, default in dict(subject='', body='', mode='new', sourceId='', sourceFolder='inbox',
+    for key, default in dict(subject='', body='', bodyHtml='', scheduleAt='', mode='new', sourceId='', sourceFolder='inbox',
                              recipients=[], attachments=[], deliveryState='editing', attemptSnapshot={}).items():
         value.setdefault(key, default)
     value['updatedAt'] = datetime.now(timezone.utc).isoformat()

@@ -45,14 +45,14 @@ ColumnLayout {
         onStatusChanged:if(status===PdfDocument.Ready){view.passwordNeeded=false;view.page=Math.min(view.page,Math.max(0,pageCount-1))}
     }
     ColumnLayout {Layout.fillWidth:true;visible:view.passwordNeeded;spacing:8
-        Label {Layout.fillWidth:true;text:'A password is needed to open this PDF.';textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.text}
+        Label {Layout.fillWidth:true;text:I18n.t('A password is needed to open this PDF.');textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.text}
         RowLayout {Layout.fillWidth:true
             TextField {id:password;objectName:'pdfPassword';Layout.fillWidth:true;implicitHeight:44;echoMode:TextInput.Password
-                Accessible.name:'PDF password';placeholderText:'PDF password';color:Theme.text;placeholderTextColor:Theme.secondary;selectByMouse:true
+                Accessible.name:I18n.t('PDF password');placeholderText:I18n.t('PDF password');color:Theme.text;placeholderTextColor:Theme.secondary;selectByMouse:true
                 onAccepted:if(text.length)view.unlock()
-                background:Surface {radius:12}
+                background:Surface {radius:Theme.fancy?12:3}
             }
-            Capsule {objectName:'pdfUnlock';text:'Open PDF';enabled:password.text.length>0;onClicked:view.unlock()}
+            Capsule {objectName:'pdfUnlock';text:I18n.t('Open PDF');enabled:password.text.length>0;onClicked:view.unlock()}
         }
     }
     Item {id:pageArea;Layout.fillWidth:true;Layout.fillHeight:true
@@ -60,8 +60,8 @@ ColumnLayout {
         visible:view.validPage&&!view.passwordNeeded&&!view.showText
         contentWidth:Math.max(width,image.width+24);contentHeight:Math.max(height,image.height+24)
         boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton;activeFocusOnTab:true
-        Accessible.role:Accessible.Pane;Accessible.name:'PDF page '+(view.page+1)+' of '+pdf.pageCount
-        Accessible.description:'Use Previous and Next to browse pages, and the zoom controls to enlarge them.'
+        Accessible.role:Accessible.Pane;Accessible.name:I18n.t('PDF page ')+(view.page+1)+I18n.t(' of ')+pdf.pageCount
+        Accessible.description:I18n.t('Use Previous and Next to browse pages, and the zoom controls to enlarge them.')
         ScrollBar.vertical:ScrollBar {}
         ScrollBar.horizontal:ScrollBar {}
         SmoothScroll {id:scrollMotion;view:pan}
@@ -80,31 +80,31 @@ ColumnLayout {
     }
     // Status feedback must not resize the page and trigger a render/layout feedback loop.
     ScrollView {anchors.fill:parent;visible:view.showText&&view.ready
-        TextArea {objectName:'pdfPageText';text:pageText.text||'This page has no selectable text.';textFormat:TextEdit.PlainText;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;color:Theme.text;Accessible.name:'PDF page text'}
+        TextArea {objectName:'pdfPageText';text:pageText.text||I18n.t('This page has no selectable text.');textFormat:TextEdit.PlainText;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;color:Theme.text;Accessible.name:I18n.t('PDF page text')}
     }
     Label {anchors.centerIn:parent;width:parent.width-32;horizontalAlignment:Text.AlignHCenter;visible:!view.passwordNeeded&&(pdf.status===PdfDocument.Error||view.ready&&!view.validPage||!view.showText&&image.status===Image.Error)
-        text:'This PDF page could not be displayed. Download the file again, or try another page.';textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.orange;padding:12
-        background:Rectangle {color:Theme.elevated;radius:12}}
+        text:I18n.t('This PDF page could not be displayed. Download the file again, or try another page.');textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.orange;padding:12
+        background:Rectangle {color:Theme.elevated;radius:Theme.fancy?12:3}}
     Label {anchors.centerIn:parent;visible:!view.passwordNeeded&&(pdf.status===PdfDocument.Loading||!view.showText&&view.ready&&image.status===Image.Loading)
-        text:'Loading PDF…';textFormat:Text.PlainText;color:Theme.secondary;padding:12
-        background:Rectangle {color:Theme.elevated;radius:12}}
+        text:I18n.t('Loading PDF…');textFormat:Text.PlainText;color:Theme.secondary;padding:12
+        background:Rectangle {color:Theme.elevated;radius:Theme.fancy?12:3}}
     }
     Item {objectName:'pdfToolbar';Layout.fillWidth:true;implicitHeight:toolbar.implicitHeight+16
-        Surface {anchors.fill:parent;radius:22}
+        Surface {anchors.fill:parent;radius:Theme.fancy?22:3}
         Flow {id:toolbar;x:8;y:8;width:parent.width-16;spacing:12
             Row {spacing:8;visible:view.ready
-                Capsule {objectName:'pdfPrevious';text:'Previous';visible:pdf.pageCount>1;enabled:view.page>0;onClicked:view.changePage(view.page-1)}
-                Label {objectName:'pdfPageCount';anchors.verticalCenter:parent.verticalCenter;textFormat:Text.PlainText;text:'Page '+(view.page+1)+' of '+pdf.pageCount;color:Theme.text;font.pixelSize:13*Theme.textScale}
-                Capsule {objectName:'pdfNext';text:'Next';visible:pdf.pageCount>1;enabled:view.page+1<pdf.pageCount;onClicked:view.changePage(view.page+1)}
+                Capsule {objectName:'pdfPrevious';text:I18n.t('Previous');visible:pdf.pageCount>1;enabled:view.page>0;onClicked:view.changePage(view.page-1)}
+                Label {objectName:'pdfPageCount';anchors.verticalCenter:parent.verticalCenter;textFormat:Text.PlainText;text:I18n.t('Page ')+(view.page+1)+I18n.t(' of ')+pdf.pageCount;color:Theme.text;font.pixelSize:13*Theme.textScale}
+                Capsule {objectName:'pdfNext';text:I18n.t('Next');visible:pdf.pageCount>1;enabled:view.page+1<pdf.pageCount;onClicked:view.changePage(view.page+1)}
             }
             Row {spacing:8;visible:view.ready
-                Capsule {objectName:'pdfZoomOut';text:'−';Accessible.name:'Zoom out';enabled:!view.showText&&view.zoom>.5;onClicked:view.changeZoom(view.zoom/1.25)}
-                Capsule {objectName:'pdfFit';text:view.fitWidth?'Fit page':'Page width';selectorMaterial:true;enabled:!view.showText
+                Capsule {objectName:'pdfZoomOut';text:'−';Accessible.name:I18n.t('Zoom out');enabled:!view.showText&&view.zoom>.5;onClicked:view.changeZoom(view.zoom/1.25)}
+                Capsule {objectName:'pdfFit';text:view.fitWidth?I18n.t('Fit page'):I18n.t('Page width');selectorMaterial:true;enabled:!view.showText
                     onClicked:{view.fitWidth=!view.fitWidth;view.changeZoom(1);Qt.callLater(function(){pan.contentX=0;pan.contentY=0})}}
-                Capsule {objectName:'pdfZoomIn';text:'+';Accessible.name:'Zoom in';enabled:!view.showText&&view.zoom<4;onClicked:view.changeZoom(view.zoom*1.25)}
-                Capsule {objectName:'pdfText';text:view.showText?'Page image':'Page text';selected:view.showText;onClicked:{view.showText=!view.showText;if(view.showText)pageText.selectAll()}}
+                Capsule {objectName:'pdfZoomIn';text:'+';Accessible.name:I18n.t('Zoom in');enabled:!view.showText&&view.zoom<4;onClicked:view.changeZoom(view.zoom*1.25)}
+                Capsule {objectName:'pdfText';text:view.showText?I18n.t('Page image'):I18n.t('Page text');selected:view.showText;onClicked:{view.showText=!view.showText;if(view.showText)pageText.selectAll()}}
             }
-            Capsule {objectName:'pdfSave';text:'Save as';visible:view.canSave;onClicked:view.saveRequested()}
+            Capsule {objectName:'pdfSave';text:I18n.t('Save as');visible:view.canSave;onClicked:view.saveRequested()}
         }
     }
 }

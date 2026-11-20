@@ -1,7 +1,7 @@
 """Translate the existing snapshot and persist edits before updating the view."""
 from datetime import date
 import re
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Signal, Slot, QLocale, QDate
 import task_state
 from planner_details import html_to_text
 from .model import Tasks
@@ -17,10 +17,11 @@ def fields_text(pairs):
     return '\n'.join(f'{text(k)}: {text(v)}' for k, v in pairs or [] if v not in (None, ''))
 
 
-def written_date(value, full=False):
+def written_date(value, full=False, language='en'):
     try:
         day = date.fromisoformat(str(value)[:10])
-        return f"{day.strftime('%A' if full else '%a')} {day.day} {day.strftime('%B' if full else '%b')}"
+        locale = QLocale('nl_BE' if language == 'nl' else 'en_GB')
+        return locale.toString(QDate(day.year, day.month, day.day), 'dddd d MMMM' if full else 'ddd d MMM')
     except ValueError:
         return text(value)
 

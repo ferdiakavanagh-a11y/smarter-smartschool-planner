@@ -6,18 +6,21 @@ Item {
     required property var control
     property var backdrop: Theme.backdrop
     property bool selected: !!control.checked
+    property bool quiet: false
     property color accent: Theme.blue
-    property real radius: height / 2
+    property real radius: Theme.fancy ? height / 2 : 8
     property real tracking: 0
     property bool selectorMaterial: false
-    property real pressT: control.down && control.enabled && Theme.motion ? 1 : 0
+    property real pressT: Theme.fancy && control.down && control.enabled && Theme.motion ? 1 : 0
     property real hoverT: control.hovered && control.enabled ? 1 : 0
     visible: control.opacity > 0
     opacity: control.enabled ? 1 : .45
     Behavior on pressT { enabled: Theme.motion; NumberAnimation { duration: surface.control.down ? 140 : 240; easing.type: Easing.OutCubic } }
     Behavior on hoverT { NumberAnimation { duration: Theme.motion ? 160 : 0 } }
+    Rectangle {anchors.fill:parent;visible:!Theme.fancy;radius:surface.radius;color:surface.selected?Theme.blue:surface.control.down?Theme.fill:surface.control.hovered?Theme.selection:surface.quiet?'transparent':Theme.elevated;border.color:surface.control.visualFocus?Theme.text:surface.selected?Theme.blue:Theme.separator;border.width:surface.control.visualFocus?2:surface.selected||!surface.quiet?1:0}
     Loader {
         id: lens
+        active: Theme.fancy
         x: -Math.min(10,surface.height*.18)*surface.pressT/2
         y: -surface.height*.08*surface.pressT/2
         width: surface.width-2*x; height: surface.height-2*y

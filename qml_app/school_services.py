@@ -275,22 +275,45 @@ def _school_url(session, url):
     return parsed.geturl()
 
 
-def _get(session, url, conditional=None):
+def _storage_url(url):
+    if not isinstance(url, str) or not url or any(ord(c) <= 32 or ord(c) == 127 for c in url) or '\\' in url:
+        return False
+    parsed = urlsplit(url)
+    return (parsed.scheme == 'https' and parsed.port in (None, 443)
+            and parsed.username is None and parsed.password is None and not parsed.fragment
+            and re.fullmatch(r'smscdownload[0-9]+\.smartschool\.be', parsed.hostname or '') is not None)
+
+
+def _get(session, url, conditional=None, *, storage=None):
+    on_storage = False
     for _ in range(6):
-        url = _school_url(session, url)
+        if storage is not None and _storage_url(url):
+            on_storage = True
+            storage.cookies.clear()
+            client = storage
+        else:
+            if on_storage:
+                raise ValueError('Invalid storage redirect')
+            url = _school_url(session, url)
+            client = session
         headers = {}
         if conditional and conditional.get('resourceKey') == hashlib.sha256(url.encode()).hexdigest():
             if conditional.get('etag'):
                 headers['If-None-Match'] = _validator(conditional['etag'])
             elif conditional.get('lastModified'):
                 headers['If-Modified-Since'] = _validator(conditional['lastModified'])
-        response = session.get(url, stream=True, allow_redirects=False, timeout=(10, 30), **({'headers': headers} if headers else {}))
+        response = client.get(url, stream=True, allow_redirects=False, timeout=(10, 30), **({'headers': headers} if headers else {}))
         try:
-            _school_url(session, response.url)
+            if on_storage:
+                if not _storage_url(response.url):
+                    raise ValueError('Invalid storage response')
+            else:
+                _school_url(session, response.url)
             if response.status_code in (301, 302, 303, 307, 308):
-                url = _school_url(session, urljoin(url, response.headers.get('Location', '')))
-                if not response.headers.get('Location'):
+                location = response.headers.get('Location', '')
+                if not location or '\\' in location or any(ord(c) < 32 for c in location):
                     raise ValueError('Invalid download redirect')
+                url = urljoin(url, location)
                 response.close()
                 continue
             response.raise_for_status()
@@ -369,7 +392,6 @@ def download(session, attachment, directory, cached=None):
                     raise ValueError('Report download information is too large')
             payload = json.loads(body)
             url = payload.get('url') if isinstance(payload, dict) else None
-            _school_url(session, url)
         finally:
             metadata.close()
     else:
@@ -389,8 +411,11 @@ def download(session, attachment, directory, cached=None):
                 previous_hash = hashlib.file_digest(file, 'sha256').hexdigest()
             if previous_hash == cached.get('sha256'):
                 conditional = cached
-    response, temporary = _get(session, url, conditional), None
+    storage = requests.Session()
+    storage.trust_env = False  # Signed links need neither school credentials nor ambient .netrc authentication.
+    response, temporary = None, None
     try:
+        response = _get(session, url, conditional, storage=storage)
         metadata = dict(sha256='', etag=_validator(response.headers.get('ETag', '')),
                         lastModified=_validator(response.headers.get('Last-Modified', '')),
                         resourceKey=hashlib.sha256(response.url.encode()).hexdigest()) if kind in ('report','planner') else {}
@@ -438,6 +463,8 @@ def download(session, attachment, directory, cached=None):
             metadata['sha256'] = digest.hexdigest()
         return dict(path=str(target), name=name, bytes=total, mime=mime, reused=reused, **metadata)
     finally:
-        response.close()
+        if response is not None:
+            response.close()
+        storage.close()
         if temporary is not None:
             temporary.unlink(missing_ok=True)

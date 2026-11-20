@@ -33,7 +33,25 @@ def log_error(root, info):
         pass
 
 
+def _note_view(result):
+    metadata = '\n\n'.join(filter(None, [fields_text(result.get('fields')), fields_text([('Choice', result.get('choice')), ('Date', result.get('date'))])]))
+    body = '\n\n'.join(filter(None, [text(result.get('text')), metadata]))
+    from html import escape
+    from .message_formatting import safe_html
+    try:
+        source = result.get('text') or ''
+        if not isinstance(source, str):
+            raise ValueError('Invalid note document')
+        document = safe_html(source) if re.search(r'<[a-zA-Z][^>]*>', source) else escape(source).replace('\n', '<br>')
+        body_html = document + ('<p>' + escape(metadata).replace('\n', '<br>') + '</p>' if metadata else '')
+    except ValueError:
+        body_html = ''
+    return dict(title='LVS note', body=body, bodyHtml=body_html, links=result.get('attachments') or [])
+
+
 class Backend(QObject):
+    noteDetailsChanged = Signal()
+    _prefetched = Signal(object, str, object)
     changed = Signal()
     groupsChanged = Signal(int)
     error = Signal(str)
@@ -47,6 +65,10 @@ class Backend(QObject):
         self.data = {}
         self._settings = task_state.load_settings(self.root)
         self._jobs = set()
+        self._note_details = {}
+        self._manual_notes = set()
+        self._preload_notes = False
+        self._prefetched.connect(self._accept_prefetched, Qt.QueuedConnection)
         self._closed = False
         self._status = ''
         self._last_failure = None
@@ -55,6 +77,7 @@ class Backend(QObject):
         self._notice = {}
         self.sync_after_choice = False
         self.tasks = PlannerTasks(self.root, self.verify_account)
+        self.tasks.language = self.settings['language']
         self.tasks.failed.connect(self.error)
         self._groups_cache = {}
         self.groupsChanged.connect(self._invalidate_groups)
@@ -76,6 +99,9 @@ class Backend(QObject):
 
     def reload(self):
         self.data = {}
+        self._note_details.clear()
+        self._manual_notes.clear()
+        self.noteDetailsChanged.emit()
         try:
             data = json.loads((self.root/'data/planner_data.json').read_text(encoding='utf-8'))
             if not isinstance(data, dict) or data.get('account_key') != self.account():
@@ -124,11 +150,22 @@ class Backend(QObject):
                 self.error.emit('Local tasks could not be read. Existing files were kept.')
         self.tasks.replace(self.data)
         self._features.reset()
+        if self._preload_notes:
+            self.preloadNotes()
         self.groupsChanged.emit(-1)
         self.changed.emit()
 
     @Property(str, notify=changed)
     def status(self):
+        if self.settings['language'] == 'nl':
+            if self._status.startswith('Last synced · '):
+                stamp = str(self.data.get('generated_at') or '')
+                try:
+                    return 'Laatst gesynchroniseerd · '+written_date(stamp, language='nl')+datetime.fromisoformat(stamp).strftime(', %H:%M')
+                except ValueError:
+                    return 'Laatst gesynchroniseerd · onbekend'
+            return {'Not synced yet · use Sync to load your planner': 'Nog niet gesynchroniseerd · gebruik Synchroniseren om je planner te laden',
+                    'Saved planner unavailable · check login details and sync again': 'Opgeslagen planner niet beschikbaar · controleer je aanmeldgegevens en synchroniseer opnieuw'}.get(self._status, self._status)
         return self._status
 
     @Property(bool, notify=changed)
@@ -151,7 +188,7 @@ class Backend(QObject):
             values['textSize'] = {'s': .9, 'm': 1, 'l': 1.15}.get(size, 1) if isinstance(size, str) else 1
             level = values.get('glassLevel', 0)
             values['glassLevel'] = max(0, min(2, level))/2 if type(level) in (int, float) and (not isinstance(level, float) or math.isfinite(level)) else 0
-        for key, options in dict(renderingMode=('fancy', 'performance'), style=('clear', 'vivid'), scheme=('light', 'dark', 'auto')).items():
+        for key, options in dict(renderingMode=('fancy', 'performance'), style=('clear', 'vivid'), scheme=('light', 'dark', 'auto'), language=('en', 'nl')).items():
             if values.get(key) not in options:
                 values[key] = options[0]
         for key, (low, high, default) in dict(glassLevel=(0, 1, 0), distortion=(0, 1, .25), textSize=(.9, 1.35, 1), wallpaperIndex=(0, 3, 1)).items():
@@ -173,6 +210,15 @@ class Backend(QObject):
     @Property(str, notify=changed)
     def school(self):
         return str(self.data.get('main_url') or '')
+
+    @Property(str, notify=changed)
+    def accountName(self):
+        value = self.data.get('account_name')
+        return ' '.join(value.split()) if isinstance(value, str) else ''
+
+    @Property(str, notify=changed)
+    def accountInitial(self):
+        return self.accountName[:1].upper() or '?'
 
     @Property(str, notify=changed)
     def warnings(self):
@@ -203,6 +249,11 @@ class Backend(QObject):
         if self._closed:
             return
         self._jobs.discard(name)
+        if name.startswith('lvs:') and result is not None and result.get('_snapshot', self.data) is not self.data:
+            return
+        if name.startswith('preload-notes:'):
+            self.noteDetailsChanged.emit()
+            return
         if name.startswith('feature:'):
             try:
                 self._features.receive(name[8:], result, failure)
@@ -235,8 +286,12 @@ class Backend(QObject):
                     self.verify_account()
                     if result.get('private') or result.get('deleted'):
                         raise ValueError('This note is no longer available.')
+                    if not any(str(n.get('id')) == token[6:] for n in (self.data.get('lvs') or {}).get('notes', [])):
+                        return
                     self.markRead(token)
-                    self.detailReady.emit(token, dict(title='LVS note', body='\n\n'.join(filter(None, [text(result.get('text')), fields_text(result.get('fields')), fields_text([('Choice', result.get('choice')), ('Date', result.get('date'))])])), links=result.get('attachments') or []))
+                    self._note_details[token] = info = _note_view(result)
+                    self.noteDetailsChanged.emit()
+                    self.detailReady.emit(token, info)
                 except Exception:
                     self.error.emit('The note is no longer available for this account. Sync LVS and try again.')
         self.changed.emit()
@@ -244,7 +299,7 @@ class Backend(QObject):
     @Slot(result=bool)
     def syncNow(self):
         if self.renderingChoicePending:
-            self.error.emit('Choose Fancy or Performance in Settings before the first sync.')
+            self.error.emit('Choose Liquid Glass or Smartschool in Settings before the first sync.')
             return False
         def sync_now():
             import sync
@@ -267,7 +322,8 @@ class Backend(QObject):
 
     @Slot('QVariantMap', result=bool)
     def saveSettings(self, values):
-        choices = dict(renderingMode=('fancy', 'performance'), style=('vivid', 'clear'), scheme=('auto', 'dark', 'light'))
+        old_language = self.settings['language']
+        choices = dict(renderingMode=('fancy', 'performance'), style=('vivid', 'clear'), scheme=('auto', 'dark', 'light'), language=('en', 'nl'))
         try:
             if self._settings.get('qmlVersion') != 1:
                 names = set(choices) | {'glassLevel', 'distortion', 'textSize', 'wallpaperIndex', 'reducedMotion', 'animatedBackground', 'highContrast'}
@@ -287,10 +343,18 @@ class Backend(QObject):
                     raise ValueError('Unknown setting')
             if self._settings.get('qmlVersion') != 1 or any(self._settings.get(k) != v for k, v in values.items()):
                 self._settings = task_state.save_appearance_settings(self.root, values)
+            if self.settings['language'] != old_language:
+                self.tasks.setLanguage(self.settings['language'])
+                self.groupsChanged.emit(-1)
+                self.changed.emit()
             return True
         except (OSError, ValueError):
             self.error.emit('Could not save settings. Check disk access and try again.')
             return False
+
+    @Slot(str, result=bool)
+    def setLanguage(self, language):
+        return self.saveSettings(dict(language=language))
 
     @Slot(str, result=bool)
     def chooseRendering(self, mode):
@@ -383,14 +447,14 @@ class Backend(QObject):
             return {}
         flags = self.taskBadges(task_id)
         facts = [dict(label=label, value=text(value)) for label, value in
-                 [('Course', item.get('course')), ('Type', item.get('type')), ('Posted', written_date(item.get('posted_date'))), ('Due', written_date(item.get('due_date')))] if value]
+                 [('Course', item.get('course')), ('Type', item.get('type')), ('Posted', written_date(item.get('posted_date'), language=self.settings['language'])), ('Due', written_date(item.get('due_date'), language=self.settings['language']))] if value]
         metadata = fields_text([(fact['label'], fact['value']) for fact in facts])
         body = text(item.get('body'))
         links = [dict(a, downloadable=bool(a.get('url'))) for a in item.get('attachments') or []]
         links += [dict(a, downloadable=False) for a in item.get('weblinks') or []]
         if self.school and not item.get('message_id'):
             links.append(dict(name='Open in Smartschool', url=planner_url(self.data, item, item.get('posted_date'))))
-        return dict(body=body, sections=instruction_sections(item), facts=facts, metadata=metadata, status=flags, links=links, messageId=item.get('message_id', ''))
+        return dict(body=body, sections=instruction_sections(item, self.settings['language']), facts=facts, metadata=metadata, status=flags, links=links, messageId=item.get('message_id', ''))
 
     @Slot(str, result=str)
     def taskBadges(self, task_id):
@@ -436,6 +500,49 @@ class Backend(QObject):
         self._groups_cache.pop(2, None)
         self._groups_cache.pop(3, None)
 
+    @Property('QVariantMap', notify=noteDetailsChanged)
+    def noteDetails(self):
+        return self._note_details
+
+    @Property(bool, notify=noteDetailsChanged)
+    def notesLoading(self):
+        return f'preload-notes:{id(self.data)}' in self._jobs
+
+    def preloadNotes(self):
+        self._preload_notes = True
+        snapshot = self.data
+        account = snapshot.get('account_key')
+        ids = [str(n['id']) for n in (snapshot.get('lvs') or {}).get('notes', []) if n.get('id')]
+        if not account or not ids:
+            return
+
+        def current():
+            return not self._closed and self.data is snapshot and self.account() == account
+
+        def fetch():
+            import sync
+            credentials = credential_store.smartschool_credentials(self.root/'credentials.yml')
+            if not current():
+                return
+            with sync.TimeoutSmartschool(credentials) as session:
+                for note_id, result in sync.iter_lvs_note_details(session, ids, current):
+                    self._prefetched.emit(snapshot, 'notes:'+note_id, result)
+
+        if self._job(f'preload-notes:{id(snapshot)}', fetch):
+            self.noteDetailsChanged.emit()
+
+    @Slot(object, str, object)
+    def _accept_prefetched(self, snapshot, token, result):
+        if self._closed or self.data is not snapshot or token in self._manual_notes or token in self._note_details:
+            return
+        try:
+            self.verify_account()
+        except Exception:
+            return
+        self._note_details[token] = info = _note_view(result)
+        self.noteDetailsChanged.emit()
+        self.detailReady.emit(token, info)
+
     @Slot(str)
     def openNote(self, note_id):
         try:
@@ -446,10 +553,17 @@ class Backend(QObject):
         except Exception:
             self.error.emit('Sync this account before opening LVS notes.')
             return
+        token = 'notes:'+note_id
+        snapshot = self.data
+        self._manual_notes.add(token)
+        if self._note_details.pop(token, None) is not None:
+            self.noteDetailsChanged.emit()
         def fetch():
             import sync
             credentials = credential_store.smartschool_credentials(self.root/'credentials.yml')
-            detail = sync.fetch_lvs_note_detail(sync.TimeoutSmartschool(credentials), note_id)
+            with sync.TimeoutSmartschool(credentials) as session:
+                detail = sync.fetch_lvs_note_detail(session, note_id)
+            detail['_snapshot'] = snapshot
             if self.account() != account:
                 raise ValueError('Login details changed during the request.')
             return detail

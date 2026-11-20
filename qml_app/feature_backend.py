@@ -200,6 +200,10 @@ class SchoolFeatures(QObject):
                 self.backend.error.emit('This downloaded file has local changes. Save those changes elsewhere or remove the local copy before fetching the school version again.')
                 self.changed.emit()
                 return
+            if kind in ('download', 'view_planner'):
+                self.backend.error.emit('The file could not be downloaded. Retry the download to request a fresh link.')
+                self.changed.emit()
+                return
             if kind == 'view_report':
                 self.backend.error.emit('The report could not be checked for changes. Your saved copy was kept; retry when connected.')
                 self.changed.emit()
@@ -278,8 +282,21 @@ class SchoolFeatures(QObject):
     def loadMessages(self):
         folder=self._message_folder
         if folder=='local':self.messagesChanged.emit();return
-        limit=self._message_limit
+        self._load_message_folder(folder,self._message_limit)
+
+    def _load_message_folder(self,folder,limit):
         self._start('messages',lambda c,a:dict(folder=folder,items=self._session(c,lambda s:school_services.fetch_messages(s,limit=limit,folder=folder))))
+
+    def refresh_inbox_on_open(self):
+        def when_ready():
+            if not self.accountKey or self.backend.busy or self.featureBusy or self.backend.sync_after_choice:
+                return
+            self.backend.changed.disconnect(when_ready)
+            limit=max(50,min(school_services.MAX_RECORDS,len(self._cache.get('messages',[]))))
+            self._load_message_folder('inbox',limit)
+        self.backend.changed.connect(when_ready)
+        when_ready()
+
     @Slot()
     def loadMoreMessages(self):
         if not self.featureBusy and self._message_folder!='local' and self._message_limit<school_services.MAX_RECORDS:

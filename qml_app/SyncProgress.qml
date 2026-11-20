@@ -7,15 +7,16 @@ Popup {
     objectName: "syncDialog"
     required property var app
     required property var backdrop
+    font.family: "Segoe UI Variable"
     property string action: "sync"
     readonly property bool animate: visible && app.renderActive && app.active && Theme.motion
-    readonly property string heading: action === "setup" ? "Waiting for account details"
-        : action === "install" ? "Preparing your update"
-        : app.production ? "Syncing your planner" : "Refreshing your workspace"
-    readonly property string explanation: action === "setup" ? "Complete the account window to continue."
-        : action === "install" ? "The planner will close when the update is ready."
-        : app.production ? "Fetching your latest assignments, schedule, grades and LVS."
-        : "Updating the synthetic planner data."
+    readonly property string heading: action === "setup" ? I18n.t("Waiting for account details")
+        : action === "install" ? I18n.t("Preparing your update")
+        : app.production ? I18n.t("Syncing your planner") : I18n.t("Refreshing your workspace")
+    readonly property string explanation: action === "setup" ? I18n.t("Complete the account window to continue.")
+        : action === "install" ? I18n.t("The planner will close when the update is ready.")
+        : app.production ? I18n.t("Fetching your latest assignments, schedule, grades and LVS.")
+        : I18n.t("Updating the synthetic planner data.")
     property var previousFocus
     visible: app.busy
     modal: true
@@ -29,7 +30,10 @@ Popup {
     y: (app.height - height) / 2
     onAboutToShow: { previousFocus = app.activeFocusItem; body.contentItem.contentY = 0 }
     onClosed: if (previousFocus && previousFocus.visible) previousFocus.forceActiveFocus()
-    background: SelectorLens { backdrop: progress.backdrop; radius: 32; blur: 5 * progress.opacity }
+    background: Item {
+        SelectorLens { anchors.fill:parent;visible:Theme.fancy;backdrop:progress.backdrop;radius:32;blur:5*progress.opacity }
+        Rectangle {objectName:'syncOpaqueSurface';anchors.fill:parent;visible:!Theme.fancy;radius:32;color:Theme.elevated;border.color:Theme.rim}
+    }
     Overlay.modal: Rectangle { color: Theme.alpha(Theme.bg, .48) }
     enter: Transition { ParallelAnimation {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motion ? 200 : 0; easing.type: Easing.OutCubic }
@@ -58,22 +62,25 @@ Popup {
         id: column
         width: body.availableWidth; spacing: 16
         Item {
+            objectName: "syncVisual"
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 6
             implicitWidth: 144; implicitHeight: 124
             Accessible.ignored: true
             Rectangle {
+                objectName: "syncOrbitRing"
                 anchors.centerIn: parent; width: 110; height: 110; radius: 55
                 color: "transparent"
                 border.color: Theme.alpha(Theme.blue, Theme.highContrast ? .8 : .12)
-                visible: Theme.fancy
             }
             Item {
+                id: orbit;objectName: "syncOrbit"
                 anchors.centerIn: parent; width: 110; height: 110
-                visible: Theme.fancy && progress.action !== "setup"
+                visible: progress.action !== "setup"
                 RotationAnimator on rotation {
+                    objectName: "syncOrbitSpin"
                     from: 0; to: 360; duration: 2400; loops: Animation.Infinite
-                    running: progress.animate && Theme.fancy && progress.action !== "setup"
+                    running: progress.animate && progress.action !== "setup"
                 }
                 Repeater {
                     model: 3
@@ -89,25 +96,28 @@ Popup {
                 }
             }
             Rectangle {
+                objectName: "syncBackplate"
                 anchors.centerIn: parent; anchors.verticalCenterOffset: 5
-                width: 72; height: 72; radius: 24; rotation: -9
-                color: Theme.alpha(Theme.blue, Theme.highContrast ? 0 : .09)
+                width: 72; height: 72; radius:24; rotation: -9
+                color: Theme.fancy ? Theme.alpha(Theme.blue, Theme.highContrast ? 0 : .09) : Qt.tint(Theme.elevated, Theme.alpha(Theme.blue, Theme.highContrast ? 0 : .09))
                 border.color: Theme.alpha(Theme.blue, Theme.highContrast ? 0 : .2)
-                visible: Theme.fancy
             }
             SelectorLens {
-                anchors.centerIn: parent; width: 72; height: 72; radius: 24
+                visible:Theme.fancy
+                anchors.centerIn: parent; width: 72; height: 72; radius:24
                 backdrop: progress.backdrop; strength: 18; blur: 5; tint: .18
             }
             Rectangle {
-                anchors.centerIn: parent; width: 72; height: 72; radius: 24
-                color: Theme.highContrast ? Theme.elevated : Theme.alpha(Theme.elevated, .38)
+                objectName: "syncTile"
+                anchors.centerIn: parent; width: 72; height: 72; radius:24
+                color: !Theme.fancy || Theme.highContrast ? Theme.elevated : Theme.alpha(Theme.elevated, .38)
                 border.color: Theme.highContrast ? Theme.text : Theme.alpha(Theme.blue, .2)
                 Icon {
+                    objectName: "syncDialogGlyph"
                     anchors.centerIn: parent; width: 30; height: 30
                     name: progress.action === "setup" ? "settingsBtn" : "syncBtn"
                     ink: Theme.highContrast ? Theme.text : Theme.blue
-                    RotationAnimator on rotation { from: 0; to: 360; duration: 1800; loops: Animation.Infinite
+                    RotationAnimator on rotation { objectName:"syncDialogSpin";from: 0; to: 360; duration: 1800; loops: Animation.Infinite
                         running: progress.animate && progress.action !== "setup" }
                 }
             }
@@ -115,6 +125,7 @@ Popup {
         Label {
             Layout.fillWidth: true; Layout.topMargin: 6
             textFormat: Text.PlainText; text: progress.heading
+            objectName: "syncHeading"
             font.pixelSize: 22 * Theme.textScale; font.weight: Font.DemiBold
             horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.text
         }
@@ -138,6 +149,7 @@ Popup {
                 color: Theme.highContrast ? Theme.text : Theme.blue
                 // Indeterminate motion reflects activity, never an invented completion percentage.
                 XAnimator on x {
+                    objectName: "syncIndeterminate"
                     from: -track.width * .3; to: track.width; duration: 1600; loops: Animation.Infinite
                     running: progress.animate && progress.action !== "setup"; easing.type: Easing.InOutCubic
                 }

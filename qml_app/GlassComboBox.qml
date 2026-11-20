@@ -8,11 +8,12 @@ ComboBox {
     readonly property real occupiedWidth: menu.visible?menu.width:width
     PointHandler { onActiveChanged:if(active)picker.pointerMotion=true }
     Keys.onPressed: event=>{picker.pointerMotion=false;event.accepted=false}
-    implicitHeight: 40
+    property var translatedKeys: []
+    implicitHeight: Theme.fancy?40:28*Theme.textScale
     leftPadding: 16; rightPadding: 30
     font.pixelSize: 13*Theme.textScale; font.weight: Font.DemiBold
-    background: ButtonGlass { control: picker;backdrop:picker.backdrop;selectorMaterial:picker.selectorMaterial;opacity:menu.visible?0:1 }
-    contentItem: Text {textFormat:Text.PlainText; text: picker.displayText; font: picker.font; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter;opacity:menu.visible?1-menu.reveal:1 }
+    background: ButtonGlass { control: picker;backdrop:picker.backdrop;selectorMaterial:picker.selectorMaterial;opacity:1-menu.reveal }
+    contentItem: Text {textFormat:Text.PlainText; text: picker.translatedKeys.indexOf(picker.displayText)>=0?I18n.t(picker.displayText):picker.displayText; font: picker.font; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter;opacity:menu.visible?1-menu.reveal:1 }
     indicator: Icon { name: 'chevron'; width: 14; height: 14; ink: Theme.secondary
         opacity:menu.visible?1-menu.reveal:1
         anchors.right: parent.right; anchors.rightMargin: 13; anchors.verticalCenter: parent.verticalCenter
@@ -24,11 +25,11 @@ ComboBox {
         required property int index
         required property var modelData
         width: picker.popup.width-12; height: 40*Theme.textScale
-        text: modelData; font: picker.font
+        text: picker.translatedKeys.indexOf(modelData)>=0?I18n.t(modelData):modelData; font: picker.font
         highlighted: picker.highlightedIndex===index
         leftPadding: 12; rightPadding: 26
         background: Item {
-            Rectangle { anchors.fill: parent; radius: 12; color: Theme.alpha(Theme.text, .1); visible: option.highlighted }
+            Rectangle { anchors.fill: parent; radius:Theme.fancy?12:3; color: Theme.alpha(Theme.text, .1); visible: option.highlighted }
             Rectangle { x:12; y:parent.height-1; width:parent.width-24; height:1; color:Theme.alpha(Theme.text,.08); visible:option.index<picker.count-1 }
         }
         contentItem: Text {textFormat:Text.PlainText; text: option.text; font: option.font; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
@@ -46,7 +47,8 @@ ComboBox {
         onClosed:{reveal=0;picker.pointerMotion=false}
         background: Item {
             // Morph only the optical surface; menu labels keep their native size and hit targets.
-            SelectorLens {objectName:'menuGlass';backdrop:picker.backdrop
+            Rectangle {anchors.fill:parent;visible:!Theme.fancy;radius:7;color:Theme.elevated;border.color:Theme.separator}
+            SelectorLens {visible:Theme.fancy;objectName:'menuGlass';backdrop:picker.backdrop
                 blur:picker.selectorMaterial?5*menu.reveal:0
                 x:0;y:0
                 width:menu.width;height:menu.height

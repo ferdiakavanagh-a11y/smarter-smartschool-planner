@@ -10,8 +10,8 @@ python compile_shaders.py
 python desktop_app.py
 ```
 
-On first launch, enter your login in the protected setup window and choose Fancy
-or Performance. Local date checking needs no Gemini key. An optional API key can
+On first launch, enter your login in the protected setup window and choose Liquid Glass
+or Smartschool. Local date checking needs no Gemini key. An optional API key can
 be configured in the login window.
 
 Settings contains Change login details, date checking, themes, rendering,
@@ -22,8 +22,8 @@ credentials. Use Sync for a network refresh. Existing snapshot and task-state
 files under `data/` remain compatible. Login secrets stay in Windows credential
 storage and encrypted sessions; do not share credentials or the data folder.
 
-The Qt interface needs a working graphics driver. Performance mode freezes the
-wallpaper and reduces shader sampling. WebView2 is no longer used.
+The Qt interface needs a working graphics driver. Smartschool mode uses fully opaque flat surfaces and compact controls. Liquid Glass
+retains its optical surfaces and wallpaper controls. WebView2 is no longer used.
 
 For an unattended source-folder refresh, Task Scheduler can still run
 `run_daily.bat`; it invokes `sync.py` without opening the interface.

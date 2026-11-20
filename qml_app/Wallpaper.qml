@@ -2,12 +2,13 @@ import QtQuick
 Item {
     id: wallpaper
     property bool animate: false
-    layer.enabled: true
+    layer.enabled: Theme.fancy
     layer.mipmap: true
     layer.smooth: true
     layer.textureSize: Qt.size(Math.min(1200,width),Math.min(800,height))
-    Image { anchors.fill: parent; visible: Theme.matched; source: 'backdrop.svg'; fillMode: Image.Stretch }
-    ShaderEffect { anchors.fill: parent; visible: !Theme.matched
+    Rectangle {anchors.fill:parent;color:Theme.bg;visible:!Theme.fancy}
+    Image { anchors.fill: parent; visible: Theme.fancy && Theme.matched; source: 'backdrop.svg'; fillMode: Image.Stretch }
+    ShaderEffect { anchors.fill: parent; visible: Theme.fancy && !Theme.matched
     property real phase: 0
     property color base: Theme.bg
     property color blue: Theme.blue

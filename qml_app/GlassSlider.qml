@@ -14,6 +14,6 @@ Slider {
         property real pressT:glassSlider.pressed&&Theme.motion?1:0
         Behavior on pressT{enabled:Theme.motion;NumberAnimation{duration:glassSlider.pressed?140:240;easing.type:Easing.OutCubic}}
         SelectorLens {anchors.fill:parent;backdrop:sliderSource;radius:9+parent.pressT*3;fancy:Theme.fancy}
-        Rectangle {anchors.fill:parent;radius:10;color:'transparent';border.color:glassSlider.visualFocus?Theme.text:'transparent';border.width:2}
+        Rectangle {anchors.fill:parent;radius:Theme.fancy?10:3;color:'transparent';border.color:glassSlider.visualFocus?Theme.text:'transparent';border.width:2}
     }
 }

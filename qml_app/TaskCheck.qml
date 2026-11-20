@@ -10,10 +10,10 @@ CheckBox {
         implicitWidth: control.markSize; implicitHeight: control.markSize
         x: (control.width-width)/2; y: (control.height-height)/2
         SelectorLens { anchors.fill: parent; backdrop:Theme.backdrop }
-        Rectangle { anchors.fill: parent; radius: height/2
-            color: control.checked ? '#246fae' : 'transparent'
+        Rectangle { anchors.fill: parent; radius: Theme.fancy ? height/2 : 2
+            color: control.checked ? Theme.blue : 'transparent'
             border.width: control.visualFocus ? 2 : 1
-            border.color: control.visualFocus ? Theme.text : control.checked ? '#246fae' : Theme.alpha(Theme.text,.35)
+            border.color: control.visualFocus ? Theme.text : control.checked ? Theme.blue : Theme.alpha(Theme.text,.35)
             Behavior on color {enabled:control.animateFeedback; ColorAnimation { duration: Theme.motion ? 180 : 0 } }
         }
         Icon {objectName:'completionTick'; name:'check'; ink:'white'; width:control.markSize*.65; height:width; anchors.centerIn:parent

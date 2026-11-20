@@ -129,10 +129,15 @@ def looks_truthy(value) -> bool:
 
 
 def fmt_person(name_obj) -> str:
-    """PersonDescription -> display name."""
-    if name_obj is None:
-        return ""
-    return getattr(name_obj, "starting_with_first_name", None) or getattr(name_obj, "starting_with_last_name", "") or ""
+    """SDK/bootstrap person names, with the first-name form preferred."""
+    if isinstance(name_obj, str):
+        return ' '.join(name_obj.split())
+    keys = ('starting_with_first_name', 'startingWithFirstName', 'starting_with_last_name', 'startingWithLastName')
+    for key in keys:
+        value = name_obj.get(key) if isinstance(name_obj, dict) else getattr(name_obj, key, None)
+        if isinstance(value, str) and value.strip():
+            return ' '.join(value.split())
+    return ''
 
 
 def fmt_people(users) -> str:
@@ -998,12 +1003,33 @@ def fetch_lvs_note_detail(session, item_id: str) -> dict:
     since = lvs_since()
     if not any(str(note.item_id) == item_id and not note.private for note in StudentNotes(session, since=since, until=date(since.year + 1, 8, 31))):
         raise ValueError('Note is no longer available')
+    return _visible_note_detail(session, item_id)
+
+
+def _visible_note_detail(session, item_id):
     detail = StudentNoteDetails(session, item_id=int(item_id)).get()
-    if detail is None:
-        raise ValueError('No note content')
+    if (detail is None or getattr(detail, 'private', False) or getattr(detail, 'deleted', False)
+            or str(getattr(detail, 'item_id', item_id)) != item_id):
+        raise ValueError('No visible content for this note')
     return {'text': detail.text, 'choice': detail.choice, 'fields': detail.fields,
             'date': detail.date.isoformat() if detail.date else '',
             'attachments': [{'name': attachment.file_name} for attachment in detail.attachments]}
+
+
+def iter_lvs_note_details(session, note_ids, current):
+    """Use one fresh visibility list for the batch and yield each public note as it arrives."""
+    since = lvs_since()
+    visible = {str(note.item_id) for note in StudentNotes(session, since=since, until=date(since.year + 1, 8, 31))
+               if not note.private}
+    for note_id in note_ids:
+        if not current():
+            break
+        if note_id in visible:
+            try:
+                detail = _visible_note_detail(session, note_id)
+            except Exception:
+                continue  # An unavailable note can still be retried individually.
+            yield note_id, detail
 
 
 def retain_optional_sections(results, results_note, lvs, previous, warnings):
@@ -1073,6 +1099,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
 
     # platform_id is a real request to the school, so it proves the address and login work.
     platform_id, user_id = None, None
+    account_name = ''
     try:
         platform_id = session.platform_id
     except (KeyError, IndexError, TypeError):
@@ -1090,7 +1117,9 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         raise app_errors.SyncError(info["kind"], info["title"], info["message"], info["hint"], info["details"]) from exc
 
     try:
-        user_id = session.authenticated_user["id"]
+        authenticated_user = session.authenticated_user
+        user_id = authenticated_user["id"]
+        account_name = fmt_person(authenticated_user.get('name'))
     except Exception as exc:  # noqa: BLE001
         if platform_id is None:
             # nothing verified the school at all: blame the address/login rather than carry on blind
@@ -1272,6 +1301,7 @@ def run(days_back: int = 10, days_ahead: int = 21) -> dict:
         "main_url": creds.main_url,
         "platform_id": platform_id,
         "user_id": user_id,
+        "account_name": account_name,
         "days": lessons_by_day,
         "future_tasks": future_tasks,
         "todos": todos,

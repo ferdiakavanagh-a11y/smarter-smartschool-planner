@@ -9,6 +9,7 @@ ToolTip {
     popupType: Popup.Item
     margins: 8; padding: 10; delay: 300; timeout: 6000
     width: Math.min(implicitWidth,hostWindow?hostWindow.width-32:720)
+    y: parent && parent.mapToItem(null,0,0).y<implicitHeight+12 ? parent.height+6 : -implicitHeight-6
     transformOrigin: y<0?Popup.Bottom:Popup.Top
     onAboutToShow: {
         if(!hostWindow)return
@@ -17,7 +18,7 @@ ToolTip {
     }
     onClosed: if(hostWindow && hostWindow.activeToolTip===tip)hostWindow.activeToolTip=null
     contentItem: Text {textFormat:Text.PlainText;text:tip.text;color:Theme.text;font.pixelSize:13*Theme.textScale;wrapMode:Text.Wrap}
-    background: SelectorLens {backdrop:Theme.backdrop;radius:Math.min(18,height/2)}
+    background: Surface {strong:true;radius:Theme.fancy?Math.min(16,height/2):8}
     enter: Transition {ParallelAnimation {
         NumberAnimation {property:'opacity';from:0;to:1;duration:Theme.motion?160:0;easing.type:Easing.OutCubic}
         NumberAnimation {property:'scale';from:.96;to:1;duration:Theme.motion?180:0;easing.type:Easing.OutCubic}

@@ -23,7 +23,7 @@ ColumnLayout {
         if(!planner.activeRemovals&&planner.keepCompletionTop&&planner.visible){list.resetTop();app.headerCollapsed=false}
     })}
     readonly property bool typeMenuVisible: typePicker.popup.visible
-    spacing: 15
+    spacing: Theme.fancy ? 15 : 6
     function applyFilters(){editMotion=false;scrollMotion.stop();tasks.filter(app.searchText,course,kind,pinsOnly);Qt.callLater(list.resetTop)}
     function benchmarkScroll(f){list.contentY=list.originY+Math.max(0,list.contentHeight-list.height)*f}
     function benchmarkSearch(text){app.searchText=text;applyFilters()}
@@ -35,7 +35,7 @@ ColumnLayout {
         // Capture the beginning before a delivered summary changes the graph's height.
         function onChanged(){if(planner.visible&&list.atYBeginning&&!list.moving&&!scrollMotion.active&&!scrollMotion.glide.running)list.headerTopPending=true}
     }
-    Item {id:chipsSlot;objectName:'filterSlot';Layout.fillWidth:true;Layout.leftMargin:-10;Layout.rightMargin:-10;implicitHeight:56
+    Item {id:chipsSlot;objectName:'filterSlot';Layout.fillWidth:true;Layout.leftMargin:-10;Layout.rightMargin:-10;implicitHeight:Theme.fancy?56:40*Theme.textScale
     Flickable {
         id:chips;objectName:'filterChips';parent:app.controlsLayer;width:chipsSlot.width;height:chipsSlot.height;clip:true
         readonly property point origin:app.controlPosition(chipsSlot)
@@ -43,15 +43,15 @@ ColumnLayout {
         contentWidth:chipRow.width+20;contentHeight:height;flickableDirection:Flickable.HorizontalFlick;boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton
         Row {id:chipRow;spacing:8;x:10;y:8
             Item {width:typePicker.occupiedWidth;height:typePicker.height
-            GlassComboBox {id:typePicker;objectName:'typeFilter';selectorMaterial:true;backdrop:app.controlsBackdrop;width:Math.max(112,implicitContentWidth+46)*Theme.textScale;height:40;model:tasks.kinds;currentIndex:Math.max(0,tasks.kinds.indexOf(planner.kind));Accessible.name:'Filter by assignment type'
+            GlassComboBox {id:typePicker;objectName:'typeFilter';selectorMaterial:true;backdrop:app.controlsBackdrop;width:Math.max(112,implicitContentWidth+46)*Theme.textScale;height:Theme.fancy?40:28*Theme.textScale;model:tasks.kinds;translatedKeys:tasks.kinds;currentIndex:Math.max(0,tasks.kinds.indexOf(planner.kind));Accessible.name:I18n.t('Filter by assignment type')
                 onActivated:{planner.kind=currentText;planner.applyFilters()}
             }
             }
             Repeater {model:tasks.courses
-                Capsule {objectName:'courseFilter';selectorMaterial:true;backdrop:app.controlsBackdrop;glassTracking:chips.contentX+chips.y;required property string modelData;text:modelData==='All courses'?'All':modelData;selected:planner.course===modelData;height:40;font.pixelSize:13*Theme.textScale
+                Capsule {objectName:'courseFilter';selectorMaterial:true;backdrop:app.controlsBackdrop;glassTracking:chips.contentX+chips.y;required property string modelData;text:modelData==='All courses'?(Theme.fancy?I18n.t('All'):I18n.t('Alle vakken')):modelData;selected:planner.course===modelData;height:Theme.fancy?40:28*Theme.textScale;font.pixelSize:13*Theme.textScale
                     onClicked:{planner.course=modelData;planner.applyFilters()}}
             }
-            Capsule {selectorMaterial:true;backdrop:app.controlsBackdrop;text:'Pinned only';symbol:'pin';selected:planner.pinsOnly;onClicked:{planner.pinsOnly=!planner.pinsOnly;planner.applyFilters()}}
+            Capsule {selectorMaterial:true;backdrop:app.controlsBackdrop;text:Theme.fancy?I18n.t('Pinned only'):I18n.t('Vastgezet');symbol:'pin';selected:planner.pinsOnly;onClicked:{planner.pinsOnly=!planner.pinsOnly;planner.applyFilters()}}
         }
         SmoothScroll { view:chips; horizontal:true }
     }
@@ -74,7 +74,7 @@ ColumnLayout {
         }
         function resetTop(){scrollMotion.stop();forceLayout();positionViewAtBeginning()}
         Layout.fillWidth:true;Layout.fillHeight:true;Layout.leftMargin:-16;Layout.rightMargin:-16
-        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:100*Theme.textScale
+        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:(Theme.fancy?100:20)*Theme.textScale
         displayMarginBeginning:220*Theme.textScale
         property var reflowPositions:({})
         property bool reflowQueued:false
@@ -131,7 +131,7 @@ ColumnLayout {
                 planner.entryPending=false;app.sceneReady=true
             }
         }
-        boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:'Tasks grouped by due date'
+        boundsBehavior:Flickable.StopAtBounds;acceptedButtons:Qt.LeftButton;keyNavigationEnabled:true;activeFocusOnTab:true;Accessible.name:I18n.t('Tasks grouped by due date')
         ScrollBar.vertical:ScrollBar{id:scrollBar;parent:planner.parent;visible:planner.visible;x:planner.x+list.x+list.width-width-16;y:planner.y+list.y;height:list.height}
         SmoothScroll { id:scrollMotion; objectName:'taskScrollMotion'; view:list }
         add:Transition {enabled:planner.editMotion;ParallelAnimation {
@@ -153,27 +153,27 @@ ColumnLayout {
             spacing:10
             x:16;width:list.width-32;visible:app.section===0
             height:visible?implicitHeight:0
-            Label {visible:parent.showWeek;textFormat:Text.PlainText;text:'Week ahead';font.pixelSize:24*Theme.textScale;font.bold:true;color:Theme.text;x:0;y:4}
+            Label {visible:parent.showWeek;textFormat:Text.PlainText;text:Theme.fancy?I18n.t('Week ahead'):I18n.t('Deze week');font.pixelSize:(Theme.fancy?24:18)*Theme.textScale;font.bold:true;color:Theme.text;x:0;y:4}
             Surface {
                 visible:parent.showWeek
-                id:overview;backdrop:app.sceneBackdrop;tracking:list.contentY+list.y+planner.y;refraction:20;width:parent.width;implicitHeight:Math.max(184*Theme.textScale,overviewContent.implicitHeight+36)
-                ColumnLayout {id:overviewContent;anchors.fill:parent;anchors.margins:18;spacing:8
+                id:overview;backdrop:app.sceneBackdrop;tracking:list.contentY+list.y+planner.y;refraction:20;width:parent.width;implicitHeight:Math.max((Theme.fancy?184:120)*Theme.textScale,overviewContent.implicitHeight+(Theme.fancy?36:20))
+                ColumnLayout {id:overviewContent;anchors.fill:parent;anchors.margins:Theme.fancy?18:10;spacing:Theme.fancy?8:5
                     Label {textFormat:Text.PlainText;text:tasks.weekSummary;color:Theme.text;font.pixelSize:14*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
                     RowLayout {Layout.fillWidth:true;Layout.fillHeight:true;spacing:8
                         Repeater {model:tasks.week
                             Column {required property var modelData;Layout.fillWidth:true;Layout.alignment:Qt.AlignBottom;spacing:4
-                                Accessible.role:Accessible.StaticText;Accessible.name:modelData.label+': '+modelData.count+' tasks'
+                                Accessible.role:Accessible.StaticText;Accessible.name:modelData.label+': '+modelData.count+I18n.t(' tasks')
                                 Label {textFormat:Text.PlainText;text:parent.modelData.count||'';anchors.horizontalCenter:parent.horizontalCenter;color:Theme.text;font.pixelSize:12;font.weight:Font.DemiBold}
-                                Rectangle {anchors.horizontalCenter:parent.horizontalCenter;width:Math.min(36,parent.width);height:parent.modelData.barHeight;radius:7;color:!parent.modelData.count?'#32465d':parent.modelData.test?Theme.red:parent.modelData.kind==='Taak'?Theme.blue:Theme.orange
+                                Rectangle {anchors.horizontalCenter:parent.horizontalCenter;width:Math.min(36,parent.width);height:Theme.fancy?parent.modelData.barHeight:parent.modelData.barHeight*.6;radius:7;color:!parent.modelData.count?'#32465d':parent.modelData.test?Theme.red:parent.modelData.kind==='Taak'?Theme.blue:Theme.orange
                                     Behavior on height {NumberAnimation{duration:Theme.motion?300:0;easing.type:Easing.OutCubic}}}
                                 Label {textFormat:Text.PlainText;text:parent.modelData.label;anchors.horizontalCenter:parent.horizontalCenter;color:Theme.secondary;font.pixelSize:12;font.weight:Font.DemiBold}
                             }
                         }
                     }
-                    Label {textFormat:Text.PlainText;text:'Busier days are taller · tests count extra';color:Theme.secondary;font.pixelSize:11}
-                Capsule {objectName:'summariseWeek';text:app.production&&backend.features.featureBusy?'Working…':'Summarise with Gemini';symbol:'ai';Layout.alignment:Qt.AlignLeft;Layout.maximumWidth:overviewContent.width
-                    opacity:app.production&&backend.features.aiAvailable?1:.45;enabled:app.production&&!backend.features.featureBusy;Accessible.description:'Sends this week’s unfinished task instructions to Gemini. Dates stay unchanged. A Gemini API key is required.';onClicked:app.requestAI('week')}
-                Label {visible:app.production&&backend.features.weeklySummaryReady&&backend.features.weeklySummary.length===0;text:'No unfinished tasks in the next seven days.';textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
+                    Label {textFormat:Text.PlainText;text:I18n.t('Busier days are taller · tests count extra');color:Theme.secondary;font.pixelSize:11}
+                Capsule {objectName:'summariseWeek';text:app.production&&backend.features.featureBusy?I18n.t('Working…'):I18n.t('Summarise with Gemini');symbol:'ai';Layout.alignment:Qt.AlignLeft;Layout.maximumWidth:overviewContent.width
+                    opacity:app.production&&backend.features.aiAvailable?1:.45;enabled:app.production&&!backend.features.featureBusy;Accessible.description:I18n.t('Sends this week’s unfinished task instructions to Gemini. Dates stay unchanged. A Gemini API key is required.');onClicked:app.requestAI('week')}
+                Label {visible:app.production&&backend.features.weeklySummaryReady&&backend.features.weeklySummary.length===0;text:I18n.t('No unfinished tasks in the next seven days.');textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
                 Repeater {model:app.production?backend.features.weeklySummary:[]
                     ColumnLayout {required property var modelData;Layout.fillWidth:true
                         Label {text:modelData.date;textFormat:Text.PlainText;color:Theme.text;font.bold:true}
@@ -185,13 +185,13 @@ ColumnLayout {
             }
             }
             Row {spacing:10
-                Capsule {objectName:'missedButton';text:'Missed · '+tasks.missedTasks.length;onClicked:app.showTaskCollection('missed')}
-                Capsule {objectName:'completedButton';text:'Completed · '+tasks.completedCount;onClicked:app.showTaskCollection('completed')}
+                Capsule {objectName:'missedButton';text:(Theme.fancy?I18n.t('Missed · '):I18n.t('Gemist · '))+tasks.missedTasks.length;onClicked:app.showTaskCollection('missed')}
+                Capsule {objectName:'completedButton';text:(Theme.fancy?I18n.t('Completed · '):I18n.t('Voltooid · '))+tasks.completedCount;onClicked:app.showTaskCollection('completed')}
             }
         }
         section.property:'group';section.criteria:ViewSection.FullString
         // Qt updates the section context when reusing headings; a required property can retain its old value.
-        section.delegate:Item {id:heading;x:16;width:list.width-32;height:64*Theme.textScale
+        section.delegate:Item {id:heading;x:16;width:list.width-32;height:(Theme.fancy?64:40)*Theme.textScale
             property string motionKey:'section:'+section
             // Qt retains the outgoing row's section while transferring the heading to its successor.
             // Only the heading attached to a live first row may paint or participate in reflow.
@@ -206,7 +206,7 @@ ColumnLayout {
             // A scroll-origin correction may move the preceding header while reflow is running.
             transform:Translate {y:planner.editMotion?Math.max(heading.reflowY,list.headerItem?list.headerItem.y+list.headerItem.height-heading.y:heading.reflowY):0}
             NumberAnimation {id:headingMotion;target:heading;property:'reflowY';to:0;duration:240;easing.type:Easing.OutCubic}
-            Label {textFormat:Text.PlainText;anchors.left:parent.left;anchors.bottom:parent.bottom;anchors.bottomMargin:10;text:section;font.pixelSize:22*Theme.textScale;font.bold:true;color:Theme.text}
+            Label {textFormat:Text.PlainText;anchors.left:parent.left;anchors.bottom:parent.bottom;anchors.bottomMargin:10;text:I18n.t(section);font.pixelSize:(Theme.fancy?22:17)*Theme.textScale;font.bold:true;color:Theme.text}
             Label {textFormat:Text.PlainText;anchors.right:parent.right;anchors.rightMargin:8;anchors.bottom:parent.bottom;anchors.bottomMargin:13;text:tasks.groupCounts[section]||0;font.pixelSize:13*Theme.textScale;font.weight:Font.DemiBold;color:Theme.secondary}}
         delegate:Item {
             id:taskRow;objectName:'taskDelegate'
@@ -237,10 +237,10 @@ ColumnLayout {
             function complete(){
                 let id=taskId,target=!done,host=planner.app
                 planner.editMotion=true
-                if(tasks.change(id,'done',target))host.notify(target?'Task completed':'Task restored')
+                if(tasks.change(id,'done',target))host.notify(target?I18n.t('Task completed'):I18n.t('Task restored'))
                 else check.checked=Qt.binding(function(){return taskRow.done})
             }
-            width:list.width-32;height:Math.max(76*Theme.textScale,row.implicitHeight+28);opacity:pooled?0:retiring?1:done?.55:1
+            width:list.width-32;height:Math.max((Theme.fancy?76:68)*Theme.textScale,row.implicitHeight+(Theme.fancy?28:12*Theme.textScale));opacity:pooled?0:retiring?1:done?.55:1
             enabled:!retiring&&!pooled&&index>=0
             ListView.onRemove:{
                 if(planner.editMotion){
@@ -280,48 +280,48 @@ ColumnLayout {
                     height:taskRow.height+(taskRow.first?0:52)+(taskRow.last?0:52)}
             }
             Rectangle {x:4;y:taskRow.first?4:0;width:parent.width-8;height:parent.height-(taskRow.first?4:0)-(taskRow.last?4:0)
-                topLeftRadius:taskRow.first?24:0;topRightRadius:topLeftRadius
-                bottomLeftRadius:taskRow.last?24:0;bottomRightRadius:bottomLeftRadius
-                color:Theme.fill;opacity:hover.hovered||(taskRow.ListView.isCurrentItem&&list.activeFocus)?.5:0;Behavior on opacity{NumberAnimation{duration:Theme.motion?150:0}}}
+                topLeftRadius:taskRow.first?(Theme.fancy?24:3):0;topRightRadius:topLeftRadius
+                bottomLeftRadius:taskRow.last?(Theme.fancy?24:3):0;bottomRightRadius:bottomLeftRadius
+                color:Theme.fancy?Theme.fill:Theme.selection;opacity:hover.hovered||(taskRow.ListView.isCurrentItem&&list.activeFocus)||(!Theme.fancy&&(pinAction.visualFocus||focusAction.visualFocus||check.visualFocus))?(Theme.fancy?.5:1):0;Behavior on opacity{NumberAnimation{duration:Theme.motion?150:0}}}
             HoverHandler{id:hover}
             RowLayout {
-                id:row;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;anchors.margins:16;spacing:14
-                TaskCheck {id:check;animateFeedback:!taskRow.pooled;Layout.alignment:Qt.AlignTop;objectName:'done-'+taskRow.taskId;checked:taskRow.done;Accessible.name:(taskRow.done?'Restore ':'Complete ')+taskRow.title
+                id:row;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;anchors.margins:Theme.fancy?16:10;spacing:Theme.fancy?14:10
+                TaskCheck {id:check;markSize:Theme.fancy?26:20*Theme.textScale;animateFeedback:!taskRow.pooled;Layout.alignment:Qt.AlignTop;objectName:'done-'+taskRow.taskId;checked:taskRow.done;Accessible.name:(taskRow.done?I18n.t('Restore '):I18n.t('Complete '))+taskRow.title
                     onClicked:taskRow.complete()
                 }
                 ColumnLayout {
-                    Layout.fillWidth:true;spacing:3
+                    Layout.fillWidth:true;spacing:Theme.fancy?3:2*Theme.textScale
                     RowLayout {Layout.fillWidth:true
                         Label {textFormat:Text.PlainText;text:taskRow.course;color:Theme.text;font.pixelSize:15*Theme.textScale;font.weight:Font.DemiBold;elide:Text.ElideRight;Layout.minimumWidth:0;Layout.maximumWidth:row.width*.35}
-                        Rectangle {color:Theme.dark?Theme.alpha(Theme.badge,.55):Theme.alpha(Theme.typeColor(taskRow.kind),.2);radius:12;implicitWidth:Math.min(badge.implicitWidth+16,row.width*.24);implicitHeight:badge.implicitHeight+6
+                        Rectangle {color:Theme.dark?Theme.alpha(Theme.badge,.55):Theme.alpha(Theme.typeColor(taskRow.kind),.2);radius:Theme.fancy?12:3;implicitWidth:Math.min(badge.implicitWidth+16,row.width*.24);implicitHeight:badge.implicitHeight+6
                             Label {textFormat:Text.PlainText;id:badge;anchors.centerIn:parent;width:parent.width-16;text:taskRow.kind;elide:Text.ElideRight;color:Theme.badgeInk(taskRow.kind);font.pixelSize:10*Theme.textScale;font.bold:true}
                             HoverHandler {id:badgeHover}
                             GlassToolTip {requested:badge.truncated&&(badgeHover.hovered||check.visualFocus);text:taskRow.kind}
                         }
                         Repeater {model:taskRow.indicators.length
                             FocusScope {id:statusHint;required property int index;readonly property var modelData:taskRow.indicators[index];implicitWidth:22;implicitHeight:24;activeFocusOnTab:true
-                                Accessible.role:Accessible.StaticText;Accessible.name:modelData.label
+                                Accessible.role:Accessible.StaticText;Accessible.name:I18n.t(modelData.label)
                                 Icon {anchors.centerIn:parent;width:18;height:18;name:parent.modelData.icon;ink:parent.modelData.tone==='purple'?Theme.purple:Theme.orange}
                                 Rectangle {anchors.fill:parent;radius:6;color:'transparent';border.width:parent.activeFocus?1:0;border.color:Theme.text}
                                 HoverHandler {id:indicatorHover}
-                                GlassToolTip {requested:indicatorHover.hovered||statusHint.activeFocus;text:statusHint.modelData.label}
+                                GlassToolTip {requested:indicatorHover.hovered||statusHint.activeFocus;text:I18n.t(statusHint.modelData.label)}
                             }
                         }
                         Item {Layout.fillWidth:true}
                     }
                     Label {textFormat:Text.PlainText;text:taskRow.title;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;font.pixelSize:15*Theme.textScale;font.weight:Font.Normal;font.strikeout:taskRow.done;color:Theme.text}
-                    Label {textFormat:Text.PlainText;visible:taskRow.body!=='';text:taskRow.body;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;font.pixelSize:13*Theme.textScale;color:Theme.secondary}
-                    Label {textFormat:Text.PlainText;text:Qt.formatDate(new Date(taskRow.due+'T12:00:00'),'ddd, d MMM')+'  ·  posted '+Qt.formatDate(new Date(taskRow.posted+'T12:00:00'),'ddd d MMM');Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.tertiary;font.pixelSize:12*Theme.textScale}
-                    Label {textFormat:Text.PlainText;visible:taskRow.note!=='';text:taskRow.note;Layout.fillWidth:true;elide:Text.ElideRight;color:Theme.orange;font.italic:true;font.pixelSize:13*Theme.textScale}
+                    Label {textFormat:Text.PlainText;visible:taskRow.body!=='';text:taskRow.body;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:Theme.fancy?2:1;elide:Text.ElideRight;font.pixelSize:(Theme.fancy?13:12)*Theme.textScale;color:Theme.secondary}
+                    Label {textFormat:Text.PlainText;text:I18n.locale.toString(new Date(taskRow.due+'T12:00:00'),'ddd, d MMM')+I18n.t('  ·  posted ')+I18n.locale.toString(new Date(taskRow.posted+'T12:00:00'),'ddd d MMM');Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.tertiary;font.pixelSize:(Theme.fancy?12:11)*Theme.textScale}
+                    Label {textFormat:Text.PlainText;visible:taskRow.note!=='';text:Theme.fancy?taskRow.note:I18n.p('Note: ','Notitie: ')+taskRow.note;Layout.fillWidth:true;elide:Text.ElideRight;color:Theme.fancy?Theme.orange:Theme.secondary;font.italic:Theme.fancy;font.pixelSize:(Theme.fancy?13:12)*Theme.textScale}
                     TapHandler {onTapped:planner.editNote(taskRow.taskId,taskRow.title,taskRow.note)}
                 }
-                Capsule {Layout.preferredWidth:30;Layout.preferredHeight:30;text:taskRow.pinned?'Unpin':'Pin';symbol:'pin';iconOnly:true;quiet:true;opacity:hover.hovered||taskRow.pinned||activeFocus?1:0;onClicked:{let host=planner.app;if(tasks.change(taskRow.taskId,'pinned',!taskRow.pinned))host.notify('Pin updated')}}
-                Capsule {Layout.preferredWidth:30;Layout.preferredHeight:30;visible:!app.production||backend.canFocus(taskRow.taskId);objectName:'focus-'+taskRow.taskId;text:'Focus';symbol:'focus';iconOnly:true;quiet:true;opacity:hover.hovered||activeFocus?1:0;onClicked:planner.focusTask(taskRow.taskId,taskRow.title,taskRow.done)}
+                Capsule {id:pinAction;Layout.preferredWidth:30;Layout.preferredHeight:30;text:taskRow.pinned?I18n.t('Unpin'):I18n.t('Pin');symbol:'pin';iconOnly:true;quiet:true;opacity:!Theme.fancy||hover.hovered||taskRow.pinned||activeFocus?1:0;onClicked:{let host=planner.app;if(tasks.change(taskRow.taskId,'pinned',!taskRow.pinned))host.notify(I18n.t('Pin updated'))}}
+                Capsule {id:focusAction;Layout.preferredWidth:30;Layout.preferredHeight:30;visible:!app.production||backend.canFocus(taskRow.taskId);objectName:'focus-'+taskRow.taskId;text:I18n.t('Focus');symbol:'focus';iconOnly:true;quiet:true;opacity:!Theme.fancy||hover.hovered||activeFocus?1:0;onClicked:planner.focusTask(taskRow.taskId,taskRow.title,taskRow.done)}
             }
             Rectangle {visible:!taskRow.last;x:58;width:parent.width-74;height:1;anchors.bottom:parent.bottom;color:Theme.separator}
         }
         footer:Column {objectName:'taskFooter';visible:!planner.activeRemovals;x:16;width:list.width-32;spacing:18;topPadding:24*Theme.textScale
-            Label {textFormat:Text.PlainText;visible:tasks.count===0;text:app.section===1?'All caught up · no missed tasks':'No matching tasks';font.pixelSize:22*Theme.textScale;color:Theme.text;padding:28;anchors.horizontalCenter:parent.horizontalCenter}
+            Label {textFormat:Text.PlainText;visible:tasks.count===0;text:app.section===1?I18n.t('All caught up · no missed tasks'):I18n.t('No matching tasks');font.pixelSize:(Theme.fancy?22:17)*Theme.textScale;color:Theme.text;padding:28;anchors.horizontalCenter:parent.horizontalCenter}
         }
         Keys.onSpacePressed:if(currentItem)currentItem.complete()
         Keys.onReturnPressed:if(currentItem)planner.editNote(currentItem.taskId,currentItem.title,currentItem.note)

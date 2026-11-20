@@ -65,6 +65,8 @@ def main():
     if saved and not __import__('task_state').rendering_choice_pending(root):
         backend.sync_after_choice = False
         QTimer.singleShot(0, backend.syncNow)
+    QTimer.singleShot(0, backend.features.refresh_inbox_on_open)
+    QTimer.singleShot(0, backend.preloadNotes)
     application.aboutToQuit.connect(backend.shutdown)
     code = application.exec()
     backend.shutdown()

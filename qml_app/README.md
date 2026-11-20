@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File qml_app/setup.ps1
 & './qml_app/.venv/Scripts/python.exe' -m qml_app.main --count 36
 ```
 
-Optional harness flags include `--count 0`, `--count 1000`, `--mode performance`
+Optional harness flags include `--count 0`, `--count 1000`, `--mode smartschool` (or `--mode liquid-glass`)
 and `--smoke`. Harness edits are memory-only. Production never selects these
 fixtures. The `.venv`, generated shader binaries and evidence remain ignored.
 
@@ -34,10 +34,22 @@ Each has a light and dark appearance and uses the existing animation controls.
 Reduced motion stops wallpaper animation. Silk and Soft colours retain their
 original pixels; Aurora and Contour use the remaining saved indices.
 
+Smartschool uses fully opaque flat surfaces, compact top navigation and a copper accent.
+Liquid Glass keeps the optical materials and background controls. Saved `performance`
+and `fancy` settings and command-line aliases remain compatible. Glass controls are
+hidden in Smartschool without resetting their saved values. Native file choosers
+and system messageboxes keep their platform appearance; document contents are untouched.
+
 ## School panels
 
-The bottom selector has five tabs: To-do, Planner, Grades, LVS and Messages.
+The navigation has five tabs: To-do, Planner, Grades, LVS and Messages.
 To-do opens Missed and Completed assignments in separate floating sheets.
+Smartschool adds a navigable week timetable with lesson details and an upcoming-task
+pane. The Lesson list keeps every saved lesson reachable, including entries without
+usable times; narrow windows scroll the week horizontally. Smartschool results use
+a chronological month feed with score rings, subject/year/period filters and secondary
+averages. LVS uses an expanded record view, a category tree and absence charts based
+only on saved records. Messages has a folder/list/action-rail/inline-reader layout.
 Missed includes every unfinished past-due task; both sheets allow details and
 completion/restoration without changing the main list filters. Collections preserve
 row identity and animate additions/removals. Saving updates state immediately;
@@ -96,6 +108,13 @@ selected local bytes are checked again before their one-attempt upload. Uploads
 accept explicit local file types as data; download/open restrictions are separate.
 No file is uploaded before Send.
 
+Smartschool opens the composer in a separate native popup. Both modes support local
+rich-text drafts, selection formatting, lists, tables and links. Pasted HTML and send
+content are sanitized; remote images and active content are not sent. Existing plain
+drafts remain readable. Recipient pills count main accounts, co-accounts, groups and
+total selected identities: the API does not reliably identify pupil/staff categories.
+The send dropdown saves and closes a local draft; it does not schedule delivery.
+
 Drafts save locally per account, while typing and when closing the composer/app.
 The atomic store permits 200 drafts and 25 MiB total. Oversized text is retained
 with a save error rather than silently truncated. Account changes flush old local
@@ -109,7 +128,7 @@ has not been tested with a real message.
 Inbox/Sent messages can move to Trash using the verified one-attempt command and
 live folder membership. An uncertain change blocks further message actions until
 an explicit successful refresh. Cached attachments follow the new folder; offline
-files remain. The SDK has no verified restore, scheduling-edit, remote draft-save
+files remain. The SDK has no verified restore, editing of scheduled messages, remote draft-save
 or threaded-reply mapping, so those operations remain in Smartschool. School drafts,
 scheduled messages and Trash are readable here without unsupported mutation buttons.
 
@@ -152,3 +171,19 @@ process environment that permits Chromium's child processes.
 ## Attribution
 
 See THIRD_PARTY_NOTICES.md and preserve the adapted material code's MIT notices.
+
+The Settings language selector switches English/Dutch independently of appearance and
+saves the choice. School-provided content is kept in its original language. Smartschool
+uses the top navigation and one search/settings/sync action group; Messages uses that
+sync action to refresh its current folder. Settings switches use round tracks/knobs.
+
+The composer send menu can choose a future Belgium date/time in either appearance.
+The final Schedule message action submits Smartschool's verified offset-ISO sendDate
+field through the same one-attempt send route. Smartschool stores and sends the queued
+message; this app does not need to remain open. The current school's scheduling flag
+is checked from the existing fresh compose GET before any upload or send. Invalid,
+past, ambiguous and nonexistent DST times fail safely, and a time which expires during
+preparation never falls back to immediate sending. The selected time survives local
+draft restart and is part of the immutable send-attempt snapshot. Delivery has only
+been tested with synthetic responses; check Scheduled after an accepted request.
+Smartschool's inline reader also exposes an explicit Gemini Draft a reply button.

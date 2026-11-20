@@ -7,9 +7,10 @@ from pathlib import Path
 import uuid
 
 import requests
-from PySide6.QtCore import QObject, Property, Signal, Slot, QTimer, QUrl
+from PySide6.QtCore import QObject, Property, Signal, Slot, QTimer, QUrl, QDateTime, QDate, QTime, QTimeZone, Qt
 from smartschool import MessageComposerForm, RecipientType
 from .school_services import _school_url
+from .message_formatting import MessageFormatting, safe_html
 
 
 def _identity(user):
@@ -119,9 +120,46 @@ def _reply_content(mode, detail, body_override):
                 sourceFolder=str(detail.get('folder', 'inbox'))[:100]), hints
 
 
+def _schedule_time(value, *, future=True):
+    """The website writes date-fns formatISO, including the timezone offset."""
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError('Choose a date and time for your message.')
+    stamp = QDateTime.fromString(value, Qt.ISODate)
+    if not stamp.isValid() or stamp.toString(Qt.ISODate) != value or stamp.timeSpec() not in (Qt.OffsetFromUTC, Qt.UTC):
+        raise ValueError('Choose a valid date and time with a timezone.')
+    if future and stamp.toMSecsSinceEpoch() <= QDateTime.currentMSecsSinceEpoch():
+        raise ValueError('That time has already passed. Choose a later time.')
+    if future:
+        now = QDateTime.currentDateTimeUtc().toTimeZone(QTimeZone(b'Europe/Brussels'))
+        latest = QDateTime(now.date().addYears(1), QTime(23, 59, 59), now.timeZone())
+        if stamp > latest:
+            raise ValueError('Choose a time within the next year.')
+    return value
+
+
+def _scheduled_form(session):
+    # Capture the SDK's existing GET; do not create a second school draft to check capability.
+    from smartschool._common import parse_smsc_vars
+    class Capture:
+        enabled = False
+        def __getattr__(self, name): return getattr(session, name)
+        def get(self, *args, **kwargs):
+            response = session.get(*args, **kwargs)
+            self.enabled = parse_smsc_vars(response.text).get('isScheduledMessagesEnabled') is True
+            return response
+    capture = Capture()
+    form = MessageComposerForm.create(session=capture)
+    form.session = session
+    if not capture.enabled:
+        raise ValueError('Scheduled sending is unavailable for this school account.')
+    return form
+
+
 def _send(session, selected, subject, body, current, attempt):
     if not current(): raise ValueError('Account changed')
-    form = MessageComposerForm.create(session=session)
+    scheduled = attempt.get('scheduleAt', '')
+    if scheduled: _schedule_time(scheduled)
+    form = _scheduled_form(session) if scheduled else MessageComposerForm.create(session=session)
     recipients = selected if isinstance(selected, list) else [selected]
     if any(r['identity'][0] != 'group' and r['identity'][2] > 0 for r in recipients) and form.can_send_to_coaccounts is not True:
         raise ValueError('This school account cannot message co-accounts')
@@ -147,7 +185,8 @@ def _send(session, selected, subject, body, current, attempt):
         form.add_recipient(recipient, {'To': RecipientType.TO, 'Cc': RecipientType.CC,
                                       'Bcc': RecipientType.BCC}[choice.get('field', 'To')])
     form.set_subject(subject)
-    form.set_message_html('<p>'+escape(body).replace('\n', '<br>')+'</p>')
+    form.set_message_html(safe_html(attempt['bodyHtml']) if attempt.get('bodyHtml') else '<p>'+escape(body).replace('\n', '<br>')+'</p>')
+    form.set_field('sendDate', scheduled)
     if not current(): raise ValueError('Account changed')
     url = _school_url(session, form._url)
     files = {key: (None, value) for key, value in form.payload.items()}
@@ -157,6 +196,7 @@ def _send(session, selected, subject, body, current, attempt):
         from .school_services import upload_message_attachment
         upload_message_attachment(session, form, attachment, current)
     if not current(): raise ValueError('Account changed')
+    if scheduled: _schedule_time(scheduled)
     if attempt.get('persist_lock'):
         attempt['persist_lock']()
     if not current(): raise ValueError('Account changed')
@@ -187,6 +227,7 @@ class MessageComposer(QObject):
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
+        self._formatting = MessageFormatting(self)
         self._choices, self._rows = [], []
         self._recovery = {}
         self._revision, self._query_serial = 0, 0
@@ -225,7 +266,9 @@ class MessageComposer(QObject):
         self._selected_many = []
         self._field = 'To'
         self._recipient_mode, self._coaccounts_available = 'main', availability
-        self._subject, self._body = '', ''
+        self._subject, self._body, self._body_html = '', '', ''
+        self._schedule_at = ''
+        self._rich_error = False
         self._draft_id = uuid.uuid4().hex
         self._mode, self._source_id, self._source_folder = 'new', '', 'inbox'
         self._hints, self._attachments, self._saved = [], [], []
@@ -272,7 +315,7 @@ class MessageComposer(QObject):
         return message_drafts.load(root, self._account)
 
     def _draft(self):
-        return dict(id=self._draft_id, subject=self._subject, body=self._body, mode=self._mode,
+        return dict(id=self._draft_id, subject=self._subject, body=self._body, bodyHtml=self._body_html, scheduleAt=self._schedule_at, mode=self._mode,
                     sourceId=self._source_id, sourceFolder=self._source_folder,
                     recipients=[dict(kind='group' if r['identity'][0] == 'group' else 'user',
                                      identity=list(r['identity']), query=r['query'], name=r['name'], field=r['field'])
@@ -290,11 +333,12 @@ class MessageComposer(QObject):
         self._save_timer.stop()
         if self.sending: return True  # The immutable send snapshot is already saved.
         if self._account != self.owner.accountKey: return False
+        if self._rich_error: return False
         if len(self._subject) > 250 or len(self._body) > 100_000:
             self._error = 'This draft exceeds the subject (250) or message (100,000) character limit. Shorten it before closing; your text is still here.'
             self._save_warning = self._error
             self.changed.emit(); return False
-        if not (self._subject or self._body or self._selected_many or self._attachments) and not any(d['id'] == self._draft_id for d in self._saved): return True
+        if not (self._subject or self._body or self._selected_many or self._attachments or self._schedule_at) and not any(d['id'] == self._draft_id for d in self._saved): return True
         try:
             self._persist()
             self._recovery.pop(self._account, None)
@@ -352,13 +396,73 @@ class MessageComposer(QObject):
     @Slot(str, str)
     def updateContent(self, subject, body):
         if self._locked or self.sending or self._account != self.owner.accountKey: return
-        self._subject, self._body = subject, body
+        self._subject, self._body, self._body_html = subject, body, ''
+        self._rich_error = False
         self._save_timer.start()
+
+    @Property(QObject, constant=True)
+    def formatting(self): return self._formatting
+
+    @Property(str, notify=draftChanged)
+    def draftHtml(self): return self._body_html
+
+    @Property(str, notify=changed)
+    def savedAt(self):
+        return next((d['updatedAt'] for d in self._saved if d['id'] == self._draft_id), '')
+
+    @Slot(str, str, str)
+    def updateRichContent(self, subject, body, html):
+        if self._locked or self.sending or self._account != self.owner.accountKey: return
+        try: formatted = safe_html(html)
+        except ValueError:
+            self._rich_error = True
+            self._error = 'Formatted message is too large. Shorten it before closing.'
+            self._save_warning = self._error
+            self.changed.emit(); return
+        self._rich_error = False
+        self._subject, self._body, self._body_html = subject, body, formatted
+        self._save_timer.start()
+
+    @Slot(str, str, str)
+    def sendRich(self, subject, body, html):
+        if self._locked or self._busy: return
+        try: formatted = safe_html(html)
+        except ValueError:
+            self._error = 'Formatted message is too large.'
+            self.changed.emit(); return
+        self._body_html, self._body = formatted, body
+        self._rich_error = False
+        self.send(subject, body)
 
     @Property(str, notify=draftChanged)
     def draftSubject(self): return self._subject
     @Property(str, notify=draftChanged)
     def draftBody(self): return self._body
+    @Property(str, notify=changed)
+    def scheduleAt(self): return self._schedule_at
+    @Property(str, notify=changed)
+    def scheduleDefault(self):
+        return QDateTime.currentDateTimeUtc().toTimeZone(QTimeZone(b'Europe/Brussels')).addSecs(3600).toString('yyyy-MM-ddTHH:mm')
+
+    @Slot(str, str, result=bool)
+    def setSchedule(self, day, clock):
+        if self._locked or self._busy or self._account != self.owner.accountKey: return False
+        if not day and not clock:
+            self._schedule_at = ''
+        else:
+            date, time = QDate.fromString(day, 'yyyy-MM-dd'), QTime.fromString(clock, 'HH:mm')
+            stamp = QDateTime(date, time, QTimeZone(b'Europe/Brussels'), QDateTime.TransitionResolution.Reject)
+            try:
+                if not stamp.isValid() or date.toString('yyyy-MM-dd') != day or time.toString('HH:mm') != clock:
+                    raise ValueError('Choose another time. This time is invalid or occurs twice when the clocks change.')
+                self._schedule_at = _schedule_time(stamp.toString(Qt.ISODate))
+            except ValueError as error:
+                self._error = str(error)
+                self.changed.emit(); return False
+        self._error, self._status = self._save_warning if self._rich_error else '', ''
+        self._save_timer.start()
+        self.changed.emit()
+        return True
     @Property(str, notify=draftChanged)
     def draftMode(self): return self._mode
     @Property(int, notify=draftChanged)
@@ -444,6 +548,9 @@ class MessageComposer(QObject):
     def _restore(self, draft):
         self._draft_id = draft['id']
         self._subject, self._body = draft['subject'], draft['body']
+        self._body_html = safe_html(draft.get('bodyHtml', ''))
+        self._schedule_at = draft.get('scheduleAt', '')
+        if self._schedule_at: _schedule_time(self._schedule_at, future=False)
         self._mode = draft['mode']; self._source_id = draft.get('sourceId', '')
         self._source_folder = draft.get('sourceFolder', 'inbox')
         self._selected_many = deepcopy(draft['recipients'])
@@ -452,7 +559,9 @@ class MessageComposer(QObject):
         self._attachments = deepcopy(draft['attachments'])
         self._delivery_state = draft['deliveryState']; self._snapshot = draft['attemptSnapshot']
         self._locked = self._delivery_state != 'editing'
-        if self._locked: self._status = 'This draft has a previous send attempt. Check Sent in Smartschool before starting another message.'
+        if self._locked:
+            self._status = 'This draft has a previous send attempt. Check Sent in Smartschool before starting another message.'
+            if self._schedule_at: self._status = self._status.replace('Check Sent', 'Check Scheduled and Sent')
 
     @Slot(str, 'QVariantMap', result=bool)
     @Slot(str, 'QVariantMap', str, result=bool)
@@ -610,6 +719,11 @@ class MessageComposer(QObject):
     @Slot(str, str)
     def send(self, subject, body):
         if self._busy or self._locked: return
+        try:
+            if self._schedule_at: _schedule_time(self._schedule_at)
+        except ValueError as error:
+            self._error = str(error)
+            self.changed.emit(); return
         if self.owner.featureBusy:
             self._error = 'Wait for the current school request to finish, then retry.'
             self.changed.emit(); return
@@ -617,15 +731,16 @@ class MessageComposer(QObject):
         if not any(r.get('field', 'To') == 'To' for r in self._selected_many) or not 1 <= len(subject) <= 250 or not body.strip() or len(body) > 100_000:
             self._error = 'Choose a recipient, enter a subject (up to 250 characters) and a message (up to 100,000 characters).'
             self.changed.emit(); return
+        if body != self._body: self._body_html = ''
         self._subject, self._body = subject, body
         if not self.saveDraft(): return
         selected = deepcopy(self._selected_many)
         draft, account = self._draft(), self._account
-        snapshot = dict(subject=subject, body=body, recipients=deepcopy(draft['recipients']),
-                        attachments=deepcopy(self._attachments))
+        snapshot = dict(subject=subject, body=body, bodyHtml=self._body_html, recipients=deepcopy(draft['recipients']),
+                        attachments=deepcopy(self._attachments), scheduleAt=self._schedule_at)
         self._snapshot = snapshot
         draft.update(deliveryState='locked', attemptSnapshot=snapshot)
-        attempt = self._attempt = dict(started=False, persisted=False, attachments=deepcopy(self._attachments))
+        attempt = self._attempt = dict(started=False, persisted=False, attachments=deepcopy(self._attachments), bodyHtml=self._body_html, scheduleAt=self._schedule_at)
         def persist_lock():
             self._persist(draft, account)
             attempt['persisted'] = True
@@ -673,7 +788,7 @@ class MessageComposer(QObject):
                 self._save_timer.start()
             elif kind == 'compose_send':
                 self._locked = True
-                self._status = ('Send request accepted. Check Sent in Smartschool before sending this again.' if value == 'accepted'
+                self._status = (('Send request accepted. Check Scheduled in Smartschool before scheduling this again.' if self._schedule_at else 'Send request accepted. Check Sent in Smartschool before sending this again.') if value == 'accepted'
                                 else 'Delivery could not be confirmed. Check Sent in Smartschool before starting another message. Your draft was kept.')
         else:
             self._busy = False
@@ -681,6 +796,11 @@ class MessageComposer(QObject):
             self._error = ('Delivery could not be confirmed. Check Sent in Smartschool before starting another message.'
                            if self._locked else 'This request expired. Your draft was kept; retry when ready.')
         self._operation = ''
+        if kind == 'compose_send' and self._schedule_at:
+            self._status = self._status.replace('Check Sent', 'Check Scheduled and Sent')
+            self._error = self._error.replace('Check Sent', 'Check Scheduled and Sent')
+            if self._error and not self._attempt['started']:
+                self._error = 'The message was not scheduled. Check your school scheduling permissions, chosen time and connection. Your draft was kept.'
         if kind == 'compose_send':
             if self._attempt.get('persisted'):
                 self._delivery_state = ('accepted' if not failure and not self._error and self._status.startswith('Send request accepted') else 'unknown')

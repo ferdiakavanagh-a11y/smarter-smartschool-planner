@@ -22,13 +22,13 @@ Item {
     readonly property real shadowPadding: Math.min(width,height)>80 ? 16 : 10
     readonly property real opticalStrength: Theme.matched ? 0 : strength * 1.5 * Theme.refractionLevel
     Rectangle {
-        anchors.fill: parent; radius: glass.radius
+        anchors.fill: parent; radius: Theme.fancy ? glass.radius : 3
         color: Theme.highContrast ? Theme.elevated : Theme.surface; border.color: Theme.rim
-        visible: glass.failed || Theme.highContrast
+        visible: !Theme.fancy || glass.failed || Theme.highContrast
     }
     Loader {
         anchors.fill: parent
-        active: glass.visible && Theme.active && !glass.failed && !Theme.highContrast && glass.backdrop !== null
+        active: Theme.fancy && glass.visible && Theme.active && !glass.failed && !Theme.highContrast && glass.backdrop !== null
         sourceComponent: Item {
             ShaderEffect {
                 x: -glass.shadowPadding; y: -glass.shadowPadding
@@ -49,7 +49,7 @@ Item {
                     return Qt.vector2d(p.x-glass.shadowPadding,p.y-glass.shadowPadding)
                 }
                 property real pad: glass.shadowPadding
-                property real radius: glass.radius
+                property real radius: Theme.fancy ? glass.radius : 3
                 property real bezel: glass.bezel
                 property real thickness: glass.opticalStrength*1.6
                 property real dispersion: glass.opticalStrength/22*.06

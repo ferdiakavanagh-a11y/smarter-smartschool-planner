@@ -40,7 +40,7 @@ REM Always regenerate the spec: an old one may still request a one-file bundle.
         --hidden-import=logprise ^
         --add-data "qml_app/*.qml;qml_app" ^
         --add-data "qml_app/qmldir;qml_app" ^
-        --add-data "qml_app/Icons.js;qml_app" ^
+        --add-data "qml_app/*.js;qml_app" ^
         --add-data "qml_app/*.svg;qml_app" ^
         --add-data "qml_app/shaders/*.qsb;qml_app/shaders" ^
         --add-data "qml_app/THIRD_PARTY_NOTICES.md;qml_app" ^

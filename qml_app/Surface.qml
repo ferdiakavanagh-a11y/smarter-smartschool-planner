@@ -8,10 +8,10 @@ Rectangle {
     property bool continuous: false
     property real tracking: 0
     property real refraction: 28
-    radius: 24
-    color: Theme.highContrast ? Theme.elevated : backdrop ? 'transparent' : Theme.surface
-    border.color: Theme.rim; border.width: Theme.highContrast ? 1.5 : backdrop ? 0 : 1
-    Rectangle { visible: panel.sheen && !panel.backdrop; anchors.fill: parent; anchors.margins: 1; radius: Math.max(0,panel.radius - 1)
+    radius: Theme.fancy ? 24 : 5
+    color: !Theme.fancy ? Theme.elevated : Theme.highContrast ? Theme.elevated : backdrop ? 'transparent' : Theme.surface
+    border.color: Theme.rim; border.width: !Theme.fancy ? 1 : Theme.highContrast ? 1.5 : backdrop ? 0 : 1
+    Rectangle { visible: Theme.fancy && panel.sheen && !panel.backdrop; anchors.fill: parent; anchors.margins: 1; radius: Math.max(0,panel.radius - 1)
         topLeftRadius: Math.max(0,panel.topLeftRadius-1); topRightRadius: Math.max(0,panel.topRightRadius-1)
         bottomLeftRadius: Math.max(0,panel.bottomLeftRadius-1); bottomRightRadius: Math.max(0,panel.bottomRightRadius-1)
         gradient: Gradient {
@@ -20,7 +20,7 @@ Rectangle {
             GradientStop { position: 1; color: panel.control && Theme.dark ? "#30000000" : "#04ffffff" }
         }
     }
-    Glass {visible:panel.backdrop!==null;anchors.fill:parent;anchors.margins:panel.border.width
+    Glass {visible:Theme.fancy&&panel.backdrop!==null;anchors.fill:parent;anchors.margins:panel.border.width
         backdrop:panel.backdrop;tracking:panel.tracking;radius:Math.max(0,panel.radius-1)
         strength:panel.refraction;bezel:panel.continuous?10:26
         magnification:panel.continuous?0:opticalStrength/22*.05

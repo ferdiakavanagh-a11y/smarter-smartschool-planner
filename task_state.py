@@ -97,6 +97,8 @@ def date_checker_state(root: Path) -> dict:
 
 @state_write
 def set_setting(root: Path, key: str, value) -> dict:
+    if key == "language" and value not in ("en", "nl"):
+        raise ValueError("Unknown language")
     if key == "renderingMode" and value not in ("performance", "fancy"):
         raise ValueError("Unknown rendering mode")
     if key == 'dateChecker':
@@ -118,10 +120,12 @@ def rendering_choice_pending(root: Path) -> bool:
 def save_appearance_settings(root: Path, values: dict) -> dict:
     """Commit native preferences together, preserving unrelated settings and read state."""
     allowed = {'renderingMode', 'style', 'scheme', 'glassLevel', 'distortion', 'textSize',
-               'wallpaperIndex', 'reducedMotion', 'animatedBackground', 'highContrast'}
+               'wallpaperIndex', 'reducedMotion', 'animatedBackground', 'highContrast', 'language'}
     if set(values) - allowed:
         raise ValueError('Unknown appearance setting')
     settings = load_settings(root, strict=True)
+    if 'language' in values and values['language'] not in ('en', 'nl'):
+        raise ValueError('Unknown language')
     settings.update(values)
     settings['qmlVersion'] = 1
     _atomic_json(_settings_path(root), settings)

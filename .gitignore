@@ -36,3 +36,6 @@ tasks/
 
 # Local external scan helpers and reports
 /.github/workflows/virustotal.yml
+
+# Private website reference captures and local visual evidence
+/research/smartschool-ui/

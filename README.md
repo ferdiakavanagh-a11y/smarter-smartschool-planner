@@ -14,7 +14,7 @@ python compile_shaders.py
 python desktop_app.py
 ```
 
-The first launch opens protected account setup. Select Fancy or Performance;
+The first launch opens protected account setup. Select Liquid Glass or Smartschool;
 the initial sync runs after successful first-time setup and a rendering choice.
 Later launches show the last verified account snapshot without automatically
 syncing. Use the top Sync button to refresh your data.

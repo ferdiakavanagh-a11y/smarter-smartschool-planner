@@ -4,27 +4,29 @@ from bs4 import BeautifulSoup
 from planner_details import html_to_text
 
 
-def _text_sections(body, headings=()):
-    sections, title, lines = [], 'Instructions', []
+def _text_sections(body, headings=(), language='en'):
+    default_title = 'Instructies' if language == 'nl' else 'Instructions'
+    sections, title, lines = [], default_title, []
     for line in body.splitlines():
         label = line.strip()
         heading = (len(label) <= 80 and label.endswith(':') and not label.startswith(('•', '-', '*'))
                    or label in headings or label.casefold() == 'individually/pair/group')
         if heading:
-            if lines or title != 'Instructions':
+            if lines or title != default_title:
                 sections.append(dict(title=title, body='\n'.join(lines).strip()))
             title, lines = label.rstrip(':').strip(), []
         else:
             lines.append(line)
-    if lines or title != 'Instructions':
+    if lines or title != default_title:
         sections.append(dict(title=title, body='\n'.join(lines).strip()))
-    return [s for s in sections if s['body'] or s['title'] != 'Instructions']
+    return [s for s in sections if s['body'] or s['title'] != default_title]
 
 
-def instruction_sections(item):
+def instruction_sections(item, language='en'):
+    default_title = 'Instructies' if language == 'nl' else 'Instructions'
     body = html_to_text(str(item.get('body') or ''))
     if not body:
-        return [dict(title='Instructions', body='No additional instructions.')]
+        return [dict(title=default_title, body='Geen aanvullende instructies.' if language == 'nl' else 'No additional instructions.')]
     source = str(item.get('body') or '')
     # Cached public markup must describe this exact body, never another record or private field.
     for field in item.get('detail_fields') or []:
@@ -48,8 +50,8 @@ def instruction_sections(item):
             if title and len(title) <= 80 and content.startswith(title):
                 sections.append(dict(title=title.rstrip(':').strip(), body=content[len(title):].strip(' :\n')))
             else:
-                sections.extend(_text_sections(content))
+                sections.extend(_text_sections(content, language=language))
         if sections:
             return sections
     headings = [html_to_text(str(h)) for h in soup.find_all(re.compile(r'^h[1-6]$'))]
-    return _text_sections(body, headings) or [dict(title='Instructions', body=body)]
+    return _text_sections(body, headings, language) or [dict(title=default_title, body=body)]

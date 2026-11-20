@@ -17,8 +17,8 @@ ColumnLayout {
     WebEngineProfile {id:privateProfile;offTheRecord:true;httpCacheType:WebEngineProfile.MemoryHttpCache;persistentCookiesPolicy:WebEngineProfile.NoPersistentCookies}
     RowLayout {Layout.fillWidth:true
         Label {Layout.fillWidth:true;textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.secondary
-            text:viewer.service&&viewer.service.replacementLoading?'Fetching the current presentation…':viewer.service&&viewer.service.replacementError?viewer.service.replacementError:viewer.viewerError||(viewer.awaitingPresentation?'Opening the presentation…':'Current presentation · Smartschool / Microsoft PowerPoint')}
-        Capsule {text:'Refresh';symbol:'retry';enabled:!!viewer.service&&!viewer.service.featureBusy
+            text:viewer.service&&viewer.service.replacementLoading?I18n.t('Fetching the current presentation…'):viewer.service&&viewer.service.replacementError?viewer.service.replacementError:viewer.viewerError||(viewer.awaitingPresentation?I18n.t('Opening the presentation…'):I18n.t('Current presentation · Smartschool / Microsoft PowerPoint'))}
+        Capsule {text:I18n.t('Refresh');symbol:'retry';enabled:!!viewer.service&&!viewer.service.featureBusy
             onClicked:{viewer.presentationRevision++;viewer.awaitingPresentation=false;loadDeadline.stop();web.stop();web.url='about:blank';viewer.viewerError='';viewer.service.loadReplacement()}}
     }
     Timer {id:loadDeadline;interval:45000;onTriggered:viewer.fail('The presentation did not finish opening. Press Refresh to fetch a fresh copy and retry.')}
@@ -48,7 +48,7 @@ ColumnLayout {
         onCertificateError:error=>error.rejectCertificate()
         onRenderProcessTerminated:()=>viewer.fail('The presentation viewer stopped. Press Refresh to retry.')
         onLoadingChanged:info=>{if(info.status===WebEngineView.LoadFailedStatus)viewer.fail('The presentation could not load. Press Refresh to retry.')}
-        Accessible.name:'Teacher replacement presentation'
+        Accessible.name:I18n.t('Teacher replacement presentation')
     }
     Connections {target:viewer.service
         function onReplacementReady(html,base){viewer.presentationRevision++;viewer.viewerError='';viewer.awaitingPresentation=true;loadDeadline.restart();web.loadHtml(html,base)}

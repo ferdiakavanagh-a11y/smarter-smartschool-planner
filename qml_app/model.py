@@ -4,7 +4,7 @@ import re
 from datetime import date
 from collections import Counter
 from difflib import SequenceMatcher
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, Slot, Signal, Property, QObject, QTimer
+from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, Slot, Signal, Property, QObject, QTimer, QLocale
 TEST_KIND = re.compile(r'toets|evaluatie|test|examen|proef', re.I)
 try:
     from .fixtures import make_tasks
@@ -19,6 +19,7 @@ class Tasks(QAbstractListModel):
 
     def __init__(self, count=36, today=None):
         super().__init__()
+        self.language = "en"
         self.today = today or date(2026,10,24)
         self.all = make_tasks(count)
         self.rows = self.all[:]
@@ -84,10 +85,17 @@ class Tasks(QAbstractListModel):
         self.overdue_open = value
         self.filter(*self.filters)
 
+    def setLanguage(self, language):
+        if language not in ('en', 'nl'):
+            raise ValueError('Unknown language')
+        self.language = language
+        self.countChanged.emit()
+
     @Property('QVariantList', notify=countChanged)
     def week(self):
         from datetime import timedelta
-        days = [dict(label='Today' if i == 0 else (self.today+timedelta(days=i)).strftime('%a'), count=0, score=0, kinds=Counter()) for i in range(7)]
+        locale = QLocale('nl_BE' if self.language == 'nl' else 'en_GB')
+        days = [dict(label=('Vandaag' if self.language == 'nl' else 'Today') if i == 0 else locale.dayName((self.today+timedelta(days=i)).isoweekday(), QLocale.ShortFormat), count=0, score=0, kinds=Counter()) for i in range(7)]
         for task in self.all:
             offset = (date.fromisoformat(task['due'])-self.today).days
             if not task['done'] and 0 <= offset < 7:
@@ -110,9 +118,15 @@ class Tasks(QAbstractListModel):
         days = self.week
         total = sum(day['count'] for day in days)
         if not total:
+            if self.language == 'nl':
+                return 'Geen taken in de komende 7 dagen. Je week is vrij.'
             return 'No tasks are due in the next 7 days. Your week is clear.'
         tests = sum(not t['done'] and bool(TEST_KIND.search(t['kind'])) and 0 <= (date.fromisoformat(t['due'])-self.today).days < 7 for t in self.all)
         busiest = max(days, key=lambda day: day['score'])
+        if self.language == 'nl':
+            return (f"{total} {'taak' if total == 1 else 'taken'} in de komende 7 dagen, waaronder "
+                    f"{tests} {'toets of evaluatie' if tests == 1 else 'toetsen of evaluaties'}. "
+                    f"Drukste dag: {busiest['label']} ({busiest['count']} {'item' if busiest['count'] == 1 else 'items'}).")
         return (f"{total} {'task is' if total == 1 else 'tasks are'} due in the next 7 days, including "
                 f"{tests} {'test or evaluation' if tests == 1 else 'tests or evaluations'}. "
                 f"Busiest day: {busiest['label']} ({busiest['count']} {'item' if busiest['count'] == 1 else 'items'}).")

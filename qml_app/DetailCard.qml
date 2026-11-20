@@ -5,10 +5,10 @@ Pane {
     id:card
     property string title:''
     default property alias body:contents.data
-    padding:18
-    background:Surface {radius:18;tracking:card.y}
+    padding:Theme.fancy?18:10
+    background:Surface {radius:Theme.fancy?18:5;tracking:card.y}
     contentItem:ColumnLayout {
-        id:contents;spacing:12
-        Label {textFormat:Text.PlainText;text:card.title;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:15*Theme.textScale;font.bold:true}
+        id:contents;spacing:Theme.fancy?12:8
+        Label {textFormat:Text.PlainText;text:card.title;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:(Theme.fancy?15:12)*Theme.textScale;font.bold:true}
     }
 }

@@ -40,7 +40,7 @@ def round_window(window):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--count', type=int, choices=(0, 36, 1000), default=36)
-    parser.add_argument('--mode', choices=('fancy', 'performance'), default='fancy')
+    parser.add_argument('--mode', choices=('liquid-glass', 'smartschool', 'fancy', 'performance'), default='liquid-glass', help='Appearance; fancy/performance remain compatible aliases')
     parser.add_argument('--benchmark', action='store_true')
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--matched', action='store_true', help='Static shared backdrop and no refraction for the comparison experiment')
@@ -55,7 +55,7 @@ def main():
     engine = QQmlApplicationEngine()
     context = engine.rootContext()
     for name, value in dict(tasks=model, stopwatch=stopwatch, initialCount=args.count,
-                            initialFancy=args.mode == 'fancy', initialMatched=args.matched, benchmarkEnabled=args.benchmark).items():
+                            initialFancy=args.mode in ('fancy', 'liquid-glass'), initialMatched=args.matched, benchmarkEnabled=args.benchmark).items():
         context.setContextProperty(name, value)
     engine.load(QUrl.fromLocalFile(str(Path(__file__).with_name('Main.qml').resolve())))
     if not engine.rootObjects():

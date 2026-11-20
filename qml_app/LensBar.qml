@@ -23,7 +23,7 @@ Item {
     function keyboardPick(index){let tab=tabs.itemAt(index);if(tab)tab.forceActiveFocus(Qt.TabFocusReason);picked(index)}
     onVisibleChanged:if(!visible)canceled=true
     Connections {target:bar.ApplicationWindow.window;function onVisibleChanged(){if(!target.visible)bar.canceled=true}}
-    implicitHeight: symbols.length ? 76 : 48
+    implicitHeight: Theme.fancy ? (symbols.length ? 76 : 48) : 48*bar.textScale
     readonly property real cell: (width - 20) / Math.max(1,labels.length)
     readonly property int preview: Math.max(0,Math.min(labels.length-1,Math.floor((scrub.centroid.position.x-10)/cell)))
     readonly property real dragLeft: Math.max(0,Math.min(width-cell,scrub.centroid.position.x-grabOffset))
@@ -34,12 +34,12 @@ Item {
     // Navigation samples the app scene; settings lenses share the continuous wallpaper.
     property real pressT: contact.active && bar.motion ? 1 : 0
     Behavior on pressT { enabled:bar.motion; NumberAnimation {duration:contact.active?150:280;easing.type:Easing.OutCubic} }
-    Surface { visible:!bar.symbols.length; anchors.fill: parent; radius: height/2 }
-    SelectorLens {objectName:'navigationGlass';visible:bar.symbols.length>0;anchors.fill:parent;backdrop:bar.backdrop;fancy:bar.fancy;strength:18;rim:.24;ring:-.4;shadow:.6}
+    Surface { visible:Theme.fancy&&!bar.symbols.length; anchors.fill: parent; radius: height/2 }
+    SelectorLens {objectName:'navigationGlass';visible:Theme.fancy&&bar.symbols.length>0;anchors.fill:parent;backdrop:bar.backdrop;fancy:bar.fancy;strength:18;rim:.24;ring:-.4;shadow:.6}
     Repeater {model:bar.symbols.length?0:Math.max(0,bar.labels.length-1)
         Rectangle {required property int index;x:10+(index+1)*bar.cell;y:bar.height*.3;width:1;height:bar.height*.4;color:Theme.rim;visible:index!==bar.current&&index+1!==bar.current}
     }
-    SelectorLens { objectName:'selectionLens';backdrop: bar.backdrop; fancy: bar.fancy
+    SelectorLens { visible:Theme.fancy; objectName:'selectionLens';backdrop: bar.backdrop; fancy: bar.fancy
         x: Math.min(bar.leftEdge,bar.rightEdge)-bar.cell*.06*bar.pressT; y: (bar.height-height)/2
         width: Math.max(16,Math.abs(bar.rightEdge-bar.leftEdge))+bar.cell*.12*bar.pressT; height: (bar.height-16)*(1+.12*bar.pressT)
         strength:bar.symbols.length?24:30
@@ -53,17 +53,23 @@ Item {
                 text:modelData
                 width: bar.cell; height: bar.height-16
                 hoverEnabled: true
+                verticalPadding: Theme.fancy ? 6 : 0
                 Accessible.role: Accessible.PageTab
                 Accessible.selected: index===bar.current
-                Accessible.name: modelData+(index===1&&bar.missedCount?', '+bar.missedCount+' missed':index===5&&bar.unreadCount?', '+bar.unreadCount+' unread':'')
+                Accessible.name: modelData+(index===1&&bar.missedCount?', '+bar.missedCount+I18n.t(' missed'):index===5&&bar.unreadCount?', '+bar.unreadCount+I18n.t(' unread'):'')
                 background: Item {
+                    Rectangle {anchors.fill:parent;visible:!Theme.fancy;radius:7;color:tab.index===bar.current?Theme.selection:tab.hovered?Theme.fill:Theme.elevated;border.color:tab.visualFocus?Theme.text:Theme.separator;border.width:tab.visualFocus?2:1}
+                    Rectangle {anchors.bottom:parent.bottom;width:parent.width;height:3;visible:!Theme.fancy&&tab.index===bar.current;color:Theme.blue}
                     Rectangle {anchors.fill:parent;radius:height/2;color:'transparent';border.width:tab.visualFocus?2:0;border.color:Theme.text}
                 }
-                contentItem: Column { spacing: 2
-                    Icon { visible: bar.symbols.length>0; name: bar.symbols[tab.index] || 'ok'; anchors.horizontalCenter: parent.horizontalCenter
+                contentItem: Item {
+                    implicitHeight:tabContents.implicitHeight
+                    Column {id:tabContents;anchors.centerIn:parent;spacing:2
+                    Icon { visible: Theme.fancy && bar.symbols.length>0; name: bar.symbols[tab.index] || 'ok'; anchors.horizontalCenter: parent.horizontalCenter
                         ink: tab.index===bar.current || tab.hovered || (scrub.active && tab.index===bar.preview) ? Theme.text : Theme.secondary }
-                    Text {textFormat:Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; width:bar.cell-8;wrapMode:Text.Wrap;horizontalAlignment:Text.AlignHCenter;text: tab.modelData; font.pixelSize: (bar.symbols.length ? 12 : 14)*bar.textScale
+                    Text {textFormat:Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; width:bar.cell-8;wrapMode:Text.Wrap;horizontalAlignment:Text.AlignHCenter;text: tab.modelData; font.pixelSize: (!Theme.fancy ? 13 : bar.symbols.length ? 12 : 14)*bar.textScale
                         color: tab.index===bar.current || tab.hovered ? Theme.text : Theme.secondary; font.weight: Font.DemiBold }
+                }
                 }
                 onClicked: bar.picked(index)
                 Rectangle {objectName:'tabBadge';property int count:tab.index===1?bar.missedCount:tab.index===bar.unreadIndex?bar.unreadCount:0
@@ -86,7 +92,7 @@ Item {
         }
     }
     DragHandler {
-        id: scrub; objectName: 'navigationScrub'; target: null; yAxis.enabled: false; dragThreshold: 6
+        id: scrub; enabled:Theme.fancy; objectName: 'navigationScrub'; target: null; yAxis.enabled: false; dragThreshold: 6
         onActiveChanged: {
             if (active) bar.canceled=false
             else { let selected=bar.preview; Qt.callLater(function(){if(!bar.canceled)bar.picked(selected)}) }

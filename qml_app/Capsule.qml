@@ -3,17 +3,17 @@ import QtQuick.Controls
 Button {
     id: control
     property bool selected: false
-    property bool quiet: false
+    property bool quiet: !Theme.fancy && !primary && !selected
     property string symbol: ""
     property bool iconOnly: false
     property bool primary: false
     property var backdrop: Theme.backdrop
     property bool selectorMaterial: false
     property real glassTracking: 0
-    readonly property color labelInk: Theme.highContrast && (selected || primary) ? (Theme.dark && Theme.clear ? '#102438' : 'white') : Theme.text
-    implicitHeight: 38
-    font.pixelSize: 13 * Theme.textScale; font.weight: Font.DemiBold
-    leftPadding: 16; rightPadding: 16
+    readonly property color labelInk: (!Theme.fancy || Theme.highContrast) && (selected || primary) ? (!Theme.fancy && Theme.dark ? '#24170F' : Theme.dark && Theme.clear ? '#102438' : 'white') : Theme.text
+    implicitHeight: Theme.fancy ? 38 : Math.max(34*Theme.textScale,contentItem.implicitHeight+12)
+    font.pixelSize: (Theme.fancy ? 13 : 12) * Theme.textScale; font.weight: Font.DemiBold
+    leftPadding: Theme.fancy ? 16 : 14; rightPadding: Theme.fancy ? 16 : 14
     Accessible.name: text
     Accessible.selected: selected
     hoverEnabled: true
@@ -24,17 +24,19 @@ Button {
         control: control
         selectorMaterial:control.selectorMaterial
         selected: control.selected || control.primary
+        quiet: control.quiet
         backdrop:control.backdrop
         tracking:control.glassTracking
     }
     contentItem: Item {
-        implicitWidth: label.implicitWidth + (control.symbol && !control.iconOnly ? 28 : 0)
+        opacity: !Theme.fancy&&!control.enabled?.45:1
+        implicitWidth: label.implicitWidth + (control.symbol && !control.iconOnly ? 28*Theme.textScale : 0)
         implicitHeight: Math.max(20,label.implicitHeight)
-        Icon { visible: control.symbol !== ""; name: control.symbol; width: 20; height: 20
+        Icon { visible: control.symbol !== ""; name: control.symbol; width: 20*Theme.textScale; height: 20*Theme.textScale
             anchors.verticalCenter: parent.verticalCenter; x: control.iconOnly ? (parent.width-width)/2 : 0
             ink: control.labelInk }
         Text {textFormat:Text.PlainText; id: label; visible: !control.iconOnly; text: control.iconOnly ? "" : control.text
-            anchors.fill: parent; anchors.leftMargin: control.symbol && !control.iconOnly ? 28 : 0
+            anchors.fill: parent; anchors.leftMargin: control.symbol && !control.iconOnly ? 28*Theme.textScale : 0
             color: control.labelInk; font: control.font
             elide: Text.ElideRight
             horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }

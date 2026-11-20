@@ -1,10 +1,17 @@
 import QtQuick
 import "Icons.js" as Icons
-Image {
+Item {
+    id: icon
     property string name: "ok"
     property color ink: Theme.text
-    source: Icons.url(name, Qt.rgba(ink.r,ink.g,ink.b,1).toString())
-    opacity: ink.a
-    sourceSize: Qt.size(32,32)
-    width: 24; height: 24
+    Image {
+        anchors.fill: parent
+        source: Icons.url(icon.name, Qt.rgba(icon.ink.r,icon.ink.g,icon.ink.b,1).toString())
+        opacity: icon.ink.a
+        sourceSize: Qt.size(Math.ceil(width*2),Math.ceil(height*2))
+        fillMode: Image.PreserveAspectFit
+    }
+    Accessible.ignored: true
+    implicitWidth: 20*Theme.textScale; implicitHeight: 20*Theme.textScale
+    width: implicitWidth; height: implicitHeight
 }
