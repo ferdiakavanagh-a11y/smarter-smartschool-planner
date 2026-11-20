@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+from version import __version__
+
 REPO = "ferdiakavanagh-a11y/smarter-smartschool-planner"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"  # skips drafts and prereleases
 INSTALLER_NAME = "SmartschoolPlanner-Setup.exe"
@@ -71,7 +73,7 @@ def _open(url: str, accept: str = "*/*"):
     return resp
 
 
-def check_for_update(current_version: str) -> dict | None:
+def check_for_update(current_version: str = __version__) -> dict | None:
     """Info about a newer release ({version, tag, installer_url, checksum_url, digest, size, page}) or None."""
     with _open(API_URL, "application/vnd.github+json") as resp:
         body = resp.read(MAX_RELEASE_BYTES + 1)
