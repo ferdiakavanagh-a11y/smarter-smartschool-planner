@@ -1,10 +1,22 @@
-# Smartschool Planner 3.0.0
+# Smarter Smartschool Planner
 
-A Windows desktop planner with a native Qt Quick interface and liquid glass
-controls. It uses the existing Smartschool sync backend and keeps your planner
-snapshot, completion, pins and private notes on your computer.
+A Windows desktop app for your Smartschool timetable, assignments, results,
+student follow-up (LVS), and messages. Choose **Liquid Glass** for translucent
+controls and customizable backgrounds or **Smartschool** for compact top
+navigation and solid panels. Both appearances support English and Dutch.
 
-## Run
+## Install on Windows
+
+Download `SmartschoolPlanner-Setup.exe` from the
+[GitHub Releases page](https://github.com/ferdiakavanagh-a11y/smarter-smartschool-planner/releases).
+On first launch, sign in with your Smartschool account and choose an appearance.
+The initial sync starts after setup.
+
+On later launches, the app shows your last verified planner snapshot and refreshes
+the inbox automatically. Use **Sync** to refresh planner data. In Smartschool mode,
+the top-bar sync button refreshes the current folder while you are in **Messages**.
+
+## Run from source
 
 Use Python 3.12 on Windows:
 
@@ -14,23 +26,24 @@ python compile_shaders.py
 python desktop_app.py
 ```
 
-The first launch opens protected account setup. Select Liquid Glass or Smartschool;
-the initial sync runs after successful first-time setup and a rendering choice.
-Later launches show the last verified account snapshot without automatically
-syncing. Use the top Sync button to refresh your data.
-
 The source entry point and installed executable use the same Qt interface.
 WebView2 and pythonnet are no longer required. See [setup](SETUP.md) and
 [building the Windows executable](BUILD_EXE.md).
 
 ## Features
 
-- Planner and Missed tasks, course/type/pinned filters, week overview,
-  completion/undo, pins, durable notes and original assignment details.
-- Schedule and All Classes from the sync snapshot, with linked tasks.
-- Published grades, weighted counting totals and feedback.
-- LVS notes and absences, account/year-scoped read state, mark-all-read and
-  on-demand details. Existing private/deleted/denied-record protections remain.
+- **Tasks** — Filter by course, type or pin. Browse missed and completed work,
+  undo completion changes, and keep private task notes.
+- **Planner** — Browse the Smartschool week grid or lesson list. Open a lesson
+  for its timetable information, linked assignments and available attachments.
+  Access teacher replacements from any tab in Smartschool mode.
+- **Results** — View published grades, feedback and weighted averages. Smartschool
+  mode groups results by month and offers subject, school year and period filters.
+- **LVS** — Browse notes and absences. The app fetches accessible note content
+  in advance and tracks read status by account and school year.
+- **Messages** — Read folders and open attachments, reply or forward, and save
+  local rich-text drafts with lists, tables and links. Schedule a message if
+  your school supports it. Draft a reply with Gemini using an optional API key.
 - Compact Focus with a monotonic stopwatch, completion, pause and keep-on-top.
 - Clear/Vivid and Auto/Light/Dark themes; independent frosting and distortion;
   four backgrounds; text sizing, reduced motion and high contrast. New installs default to Clear Light with Soft colours; saved preferences are retained.
