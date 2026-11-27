@@ -9,11 +9,25 @@ Rectangle {
     readonly property var message: service ? service.messageDetail : ({})
     readonly property bool current: controller.selectedMessageId !== '' && String(message.id || '') === controller.selectedMessageId
     color: Theme.elevated
+    onMessageChanged: {
+        if (current && Theme.motion && previousId !== String(message.id)) {
+            reveal.stop()
+            content.opacity = .85
+            reveal.start()
+        }
+        previousId = current ? String(message.id) : ''
+    }
+    property string previousId: ''
+    NumberAnimation {id:reveal;target:content;property:'opacity';to:1;duration:120;easing.type:Easing.OutCubic}
+    Connections {target:Theme;function onMotionChanged(){if(!Theme.motion){reveal.stop();content.opacity=1}}}
+    Capsule {id:back;visible:pane.controller.compactReader;anchors.top:parent.top;anchors.left:parent.left;anchors.margins:12;text:I18n.p('Back to messages','Terug naar berichten');symbol:'chevronLeft';onClicked:pane.controller.closeReadingPane()}
+    Shortcut {sequence:'Escape';enabled:back.visible&&!pane.controller.readerVisible&&!pane.controller.composerVisible;onActivated:pane.controller.closeReadingPane()}
     ScrollView {
-        anchors { top:parent.top; left:parent.left; right:parent.right; bottom:actions.visible?actions.top:parent.bottom; margins:24 }
+        anchors { top:back.visible?back.bottom:parent.top; left:parent.left; right:parent.right; bottom:actions.visible?actions.top:parent.bottom; margins:24 }
         clip:true
         contentWidth: availableWidth
         ColumnLayout {
+            id:content
             width: parent.width; spacing: 16
             Label {Layout.fillWidth:true; text:pane.current ? pane.message.subject || I18n.t('Geen onderwerp') : pane.service && pane.service.messageLoading ? I18n.t('Bericht laden…') : I18n.t('Selecteer een bericht'); textFormat:Text.PlainText; wrapMode:Text.Wrap; font.pixelSize:23*Theme.textScale; font.weight:Font.Light; color:Theme.secondary}
             Label {Layout.fillWidth:true; visible:pane.current&&(pane.message.to||[]).length>0; text:I18n.t('Ontvangers: ')+(pane.message.to||[]).join(', '); textFormat:Text.PlainText; wrapMode:Text.Wrap; color:Theme.secondary; font.pixelSize:12*Theme.textScale}
@@ -22,7 +36,7 @@ Rectangle {
             RowLayout {visible:pane.current; Layout.fillWidth:true; spacing:12
                 Rectangle {width:30; height:30; radius:15; color:Theme.dark?'#344e49':'#d9eadc'
                     Label {anchors.centerIn:parent; text:pane.controller.initials(pane.message.sender); color:Theme.text; font.pixelSize:12}}
-                Label {Layout.fillWidth:true; text:(pane.message.sender||'')+'   '+(pane.message.date||''); textFormat:Text.PlainText; wrapMode:Text.Wrap; color:Theme.secondary; font.pixelSize:12*Theme.textScale}
+                Label {Layout.fillWidth:true; text:(pane.message.sender||'')+'   '+pane.controller.messageDate(pane.message.date,false); textFormat:Text.PlainText; wrapMode:Text.Wrap; color:Theme.secondary; font.pixelSize:12*Theme.textScale}
             }
             Rectangle {Layout.fillWidth:true; height:1; color:Theme.separator; visible:pane.current; Layout.topMargin:12; Layout.bottomMargin:12}
             Label {Layout.fillWidth:true; visible:!!pane.service&&!!pane.service.messageError; text:I18n.t(pane.service?pane.service.messageError:''); textFormat:Text.PlainText; wrapMode:Text.Wrap; color:Theme.text}
@@ -44,10 +58,11 @@ Rectangle {
                 Capsule {required property var modelData; Layout.fillWidth:true; text:I18n.t('Offline · ')+modelData.name; onClicked:pane.controller.showOfflineFile(modelData)}}
         }
     }
-    RowLayout {
+    Flow {
         id:actions
         visible:pane.current
         anchors { left:parent.left; right:parent.right; bottom:parent.bottom; margins:12 }
+        height:implicitHeight
         spacing:4
         Capsule {
             objectName:'inline_reply';text:I18n.t('Reply');primary:true
@@ -74,10 +89,12 @@ Rectangle {
                 y:-implicitHeight
                 PlannerMenuItem {objectName:'inline_replyAll';text:I18n.t('Reply all');enabled:!!pane.message.canReply;onTriggered:pane.controller.composeReply('replyAll','')}
                 PlannerMenuItem {objectName:'inline_forward';text:I18n.t('Forward');onTriggered:pane.controller.composeReply('forward','')}
+                PlannerMenuItem {text:I18n.t('Copy text');onTriggered:{pane.copyText();pane.controller.app.notify(I18n.t('Message text copied'),false)}}
+                PlannerMenuItem {text:I18n.t('Move to Trash');visible:pane.message.folder==='inbox'||pane.message.folder==='outbox';enabled:!pane.service.messageActionsBlocked;onTriggered:if(pane.service.trashMessage(pane.controller.selectedMessageId))pane.controller.closeReadingPane()}
+                PlannerMenuItem {text:I18n.t('Create a local task');onTriggered:pane.controller.showMessageTools()}
 
             }
         }
-        Item {Layout.fillWidth:true}
     }
     function copyText(){body.selectAll();body.copy();body.deselect()}
 }

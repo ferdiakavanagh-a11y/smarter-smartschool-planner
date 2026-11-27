@@ -13,7 +13,9 @@ Item {
     property string schoolYear:'All school years'
     property var periodSelection:[]
     property var selected:({})
-    readonly property bool grades:app.section===4
+    property bool grades:app.section===4
+    property string query:''
+    onVisibleChanged:if(visible)query=app.searchText
     readonly property bool resultMotion:grades&&!reports&&!Theme.fancy&&Theme.motion&&visible
     readonly property var service:app.production?backend.features:null
     function demoGroups(){
@@ -25,11 +27,14 @@ Item {
         }
         return [{heading:I18n.t('Synthetic workspace'),items:items}]
     }
-    readonly property var groups:{let r=revision,a=app.fixtureRevision;return app.production?backend.groups(grades?4:5,app.searchText,grades?course:'All subjects'):demoGroups()}
+    readonly property var groups: {
+        let r=revision
+        return app.production ? backend.groups(grades ? 4 : 5, query, grades ? course : 'All subjects') : demoGroups()
+    }
     readonly property var summaries:groups.filter(g=>g.items.some(i=>i.kind==='summary'))
     readonly property var allRows:{let all=[];for(let g of groups)for(let i of g.items)if(i.kind!=='summary')all.push(i);return all}
     readonly property var years:['All school years'].concat([...new Set(allRows.map(i=>i.schoolYear).filter(Boolean))].sort().reverse())
-    readonly property var rows:allRows.filter(i=>(grades||i.kind===category)&&(!grades||schoolYear==='All school years'||i.schoolYear===schoolYear)&&(!grades||!periodSelection.length||periodSelection.indexOf(i.period)>=0)).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))
+    readonly property var rows:allRows.filter(i=>(grades||i.kind===category)&&(!grades||schoolYear==='All school years'||i.schoolYear===schoolYear)&&(!grades||!periodSelection.length||periodSelection.indexOf(i.period)>=0)).sort((a,b)=>{let x=a.date||'',y=b.date||'';return x===y?0:x>y?-1:1})
     readonly property var entry:rows.find(r=>r.id===selected.id)||rows[0]||({})
     readonly property var courses:['All subjects'].concat([...new Set(rows.map(r=>r.course).filter(Boolean))])
     readonly property var periods:service?service.resources.periods||[]:[]
@@ -52,8 +57,8 @@ Item {
     }
     onResultMotionChanged:if(!resultMotion&&detailBody){detailFade.stop();detailBody.opacity=1}
     function choosePeriod(name,checked){let chosen=periodSelection.slice();if(checked&&chosen.indexOf(name)<0)chosen.push(name);if(!checked)chosen=chosen.filter(p=>p!==name);if(service&&service.selectedPeriod)service.selectPeriod('');periodSelection=chosen;selected=({})}
-    Connections {target:app;function onSectionChanged(){view.selected=({});view.reports=false} function onFixtureRevisionChanged(){view.selected=({});view.revision++}}
-    Connections {target:app.production?backend:null;function onGroupsChanged(section){view.selected=({});view.revision++}}
+    Connections {target:app;function onSearchTextChanged(){if(view.visible)view.query=app.searchText}}
+    Connections {target:app.production?backend:null;function onGroupsChanged(section){if(section<0)view.selected=({});if(section<0||section===(view.grades?4:5))view.revision++}}
     Rectangle {anchors.fill:parent;color:Theme.elevated}
     RowLayout {anchors.fill:parent;spacing:0
         Rectangle {Layout.preferredWidth:view.grades?(view.width>=1050*Theme.textScale?135*Theme.textScale:42):Math.min(230,view.width*.22);Layout.fillHeight:true;color:Theme.fill;border.color:Theme.separator
@@ -62,7 +67,7 @@ Item {
                 RowLayout {visible:!view.grades;Layout.fillWidth:true;Layout.leftMargin:12;Icon {name:'chevron';ink:Theme.secondary;width:14*Theme.textScale;height:width} Label {text:I18n.t('   ▾  Schooldossier').replace(/^\s*▾\s*/, '');color:Theme.secondary;Layout.fillWidth:true;wrapMode:Text.Wrap}}
                 Repeater {model:view.grades?[{name:I18n.t('Resultaten'),icon:'grades',kind:'results'},{name:I18n.t('Rapporten'),icon:'file',kind:'reports'}]:[{name:I18n.t('Notities'),icon:'file',kind:'notes'},{name:I18n.t('Afwezigheden'),icon:'clock',kind:'absences'}]
                     ItemDelegate {required property var modelData;Layout.fillWidth:true;implicitHeight:38*Theme.textScale;padding:5;text:modelData.name;Accessible.name:modelData.name;highlighted:view.grades?(view.reports===(modelData.kind==='reports')):view.category===modelData.kind
-                        background:Rectangle {color:parent.highlighted?Theme.alpha(Theme.blue,.12):'transparent'}
+                        background:Rectangle {color:parent.down?Theme.fill:parent.highlighted?Theme.alpha(Theme.blue,.12):parent.hovered?Theme.selection:'transparent'}
                         contentItem:RowLayout {Icon {name:parent.parent.modelData.icon;ink:Theme.blue;Layout.alignment:Qt.AlignVCenter} Label {visible:!view.grades||view.width>=1050*Theme.textScale;text:parent.parent.text;color:Theme.text;wrapMode:Text.Wrap;font.pixelSize:13*Theme.textScale}}
                         onClicked:{if(view.grades)view.reports=modelData.kind==='reports';else view.category=modelData.kind;view.selected=({})}
                         GlassToolTip {requested:parent.hovered||parent.visualFocus;text:parent.modelData.name}
@@ -113,7 +118,7 @@ Item {
                             Repeater {model:view.periods;CheckBox {required property var modelData;text:modelData.name||I18n.t('Period');icon.source:Icons.url('cal',Theme.secondary.toString());icon.width:16*Theme.textScale;icon.height:16*Theme.textScale;checked:view.periodSelection.indexOf(modelData.name)>=0||!!view.service&&view.service.selectedPeriod===modelData.name;onClicked:view.choosePeriod(modelData.name,checked)}}
                         }
                     }
-                    ListView {id:resultList;objectName:'chronologicalResults';Layout.fillWidth:true;Layout.fillHeight:true;clip:true;model:view.rows;spacing:12;leftMargin:14;rightMargin:14;topMargin:20;bottomMargin:20
+                    ListView {id:resultList;objectName:'chronologicalResults';Layout.fillWidth:true;Layout.fillHeight:true;clip:true;model:view.grades?view.rows:[];reuseItems:true;spacing:12;leftMargin:14;rightMargin:14;topMargin:20;bottomMargin:20
                         ScrollBar.vertical:ScrollBar{} SmoothScroll {view:resultList}
                         delegate:Column {required property var modelData;required property int index;width:resultList.width-28;spacing:8
                             Label {visible:index===0||view.month(view.rows[index-1])!==view.month(modelData);text:view.month(modelData);color:Theme.blue;font.pixelSize:14*Theme.textScale;topPadding:index?24:6;bottomPadding:8}
@@ -156,7 +161,11 @@ Item {
                     }
                 }
             }
-            LvsRecords {visible:!view.grades;Layout.fillWidth:true;Layout.fillHeight:true;Layout.margins:14;app:view.app;rows:view.rows;kind:view.category}
+            Loader {
+                active:!view.grades;visible:active
+                Layout.fillWidth:true;Layout.fillHeight:true;Layout.margins:14
+                sourceComponent:LvsRecords {app:view.app;rows:view.rows;kind:view.category}
+            }
         }
     }
 }

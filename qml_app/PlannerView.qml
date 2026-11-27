@@ -24,11 +24,18 @@ ColumnLayout {
     })}
     readonly property bool typeMenuVisible: typePicker.popup.visible
     spacing: Theme.fancy ? 15 : 6
-    function applyFilters(){editMotion=false;scrollMotion.stop();tasks.filter(app.searchText,course,kind,pinsOnly);Qt.callLater(list.resetTop)}
+    property string filteredQuery:''
+    function applyFilters(){filteredQuery=app.searchText;editMotion=false;scrollMotion.stop();tasks.filter(app.searchText,course,kind,pinsOnly);Qt.callLater(list.resetTop)}
     function benchmarkScroll(f){list.contentY=list.originY+Math.max(0,list.contentHeight-list.height)*f}
     function benchmarkSearch(text){app.searchText=text;applyFilters()}
     function focusSearch(){app.searchOpen=true;app.searchFocus()}
-    Connections {target:app;function onSearchTextChanged(){if(planner.visible)debounce.restart()} function onSectionChanged(){if(app.section>=2)return;course='All courses';kind='All types';tasks.setSection(app.section);applyFilters();requestEntry()}}
+    Connections {target:app;function onSearchTextChanged(){if(planner.visible)debounce.restart()} function onSectionChanged(){
+        if(app.section>=2)return
+        let changed=course!=='All courses'||kind!=='All types'
+        course='All courses';kind='All types'
+        tasks.setSection(app.section)
+        if(changed||filteredQuery!==app.searchText)applyFilters()
+    }}
     Timer {id:debounce;interval:140;onTriggered:planner.applyFilters()}
     Connections {target:Theme;function onTextScaleChanged(){planner.requestEntry()}}
     Connections {target:app.production?backend.features:null
@@ -74,7 +81,7 @@ ColumnLayout {
         }
         function resetTop(){scrollMotion.stop();forceLayout();positionViewAtBeginning()}
         Layout.fillWidth:true;Layout.fillHeight:true;Layout.leftMargin:-16;Layout.rightMargin:-16
-        clip:false;model:planner.visible?tasks:null;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:(Theme.fancy?100:20)*Theme.textScale
+        clip:false;model:tasks;reuseItems:true;cacheBuffer:180;spacing:0;topMargin:0;bottomMargin:(Theme.fancy?100:20)*Theme.textScale
         displayMarginBeginning:220*Theme.textScale
         property var reflowPositions:({})
         property bool reflowQueued:false

@@ -18,7 +18,7 @@ the top-bar sync button refreshes the current folder while you are in **Messages
 
 ## Run from source
 
-Use Python 3.12 on Windows:
+Use 64-bit Python 3.14 on Windows:
 
 ```powershell
 python -m pip install -r requirements.txt

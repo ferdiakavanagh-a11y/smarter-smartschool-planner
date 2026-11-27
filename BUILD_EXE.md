@@ -1,6 +1,7 @@
 # Build the Windows application
 
-Use Windows and Python 3.12. Run `build_exe.bat` to install the locked
+Use a clean Windows x64 environment with standard CPython 3.14 and Tcl/Tk.
+Run `build_exe.bat` to install the locked
 `requirements-release.txt`, compile the Qt shaders, and build an onedir app.
 It copies `SmartschoolPlanner.exe` and its required `_internal` folder beside
 the source files. Keep both together.
@@ -13,14 +14,19 @@ so this gate does not establish package integrity. See pip's
 [secure-install guidance](https://pip.pypa.io/en/stable/topics/secure-installs/).
 
 `setup_and_build.bat` also builds the installer if Inno Setup 6 is installed.
+Use a short checkout path for Inno Setup 6 so deeply nested Qt assets fit its
+path-length limit.
 CI invokes the same executable build before compiling the installer. Existing
 version, checksum and verified-publisher gates are retained.
 
-The desktop entry is `desktop_app.py`. QML, `qmldir`, `Icons.js`, wallpaper SVG
-and compiled shaders are included explicitly. Development `.venv` directories,
+The desktop entry is `desktop_app.py`. The build checks that the bundled
+Python 3.14 runtime, QML, `qmldir`, JavaScript, wallpaper SVG and compiled shaders
+are present. Development `.venv` directories,
 benchmark evidence and account data are excluded. PyInstaller's Qt hooks
 collect Qt plugins and QML imports. GLSL sources are kept in Git; `.qsb` files
 are generated using the pinned PySide6 version during every build.
+The build also generates QML and JavaScript bytecode sidecars with that Qt
+version and bundles them alongside their source files.
 
 Rebuild after Python, QML, icon or shader changes. A fresh source clone requires
 `python compile_shaders.py` after installing requirements.

@@ -10,7 +10,12 @@ ColumnLayout {
     property bool assignmentsOnly:false
     property date currentTime:new Date()
     Timer {interval:60000;running:calendar.visible;repeat:true;onTriggered:calendar.currentTime=new Date()}
-    readonly property var days: {let revision=app.fixtureRevision;return app.production?backend.groups(3,app.searchText,'All subjects'):[]}
+    property string query:''
+    property int revision:0
+    onVisibleChanged:if(visible)query=app.searchText
+    Connections {target:app;function onSearchTextChanged(){if(calendar.visible)calendar.query=app.searchText}}
+    Connections {target:app.production?backend:null;function onGroupsChanged(section){if(section<0||section===3)calendar.revision++}}
+    readonly property var days: {let r=revision;return app.production?backend.groups(3,query,'All subjects'):[]}
     readonly property var baseDate: {
         let today=Qt.formatDate(new Date(),'yyyy-MM-dd'),chosen=today
         if(days.length){chosen=days[days.length-1].date;for(let day of days)if(day.date>=today){chosen=day.date;break}}
@@ -64,9 +69,9 @@ ColumnLayout {
     Flow {Layout.fillWidth:true;Layout.preferredHeight:childrenRect.height;Layout.leftMargin:14;Layout.rightMargin:12;Layout.topMargin:10;Layout.bottomMargin:8;spacing:6
         Rectangle {implicitWidth:30;implicitHeight:30;radius:15;color:Theme.lesson;Label {anchors.centerIn:parent;text:"SP";color:Theme.teal;font.bold:true}}
         Label {text:I18n.t("Mijn planner");font.pixelSize:22*Theme.textScale;color:Theme.secondary;Layout.rightMargin:8}
-        Capsule {text:I18n.t('Previous week');iconOnly:true;symbol:'chevronLeft';onClicked:calendar.weekOffset--}
+        Capsule {text:I18n.t('Previous week');iconOnly:true;quiet:false;symbol:'chevronLeft';onClicked:calendar.weekOffset--}
         Capsule {text:I18n.t('Vandaag');onClicked:calendar.weekOffset=0}
-        Capsule {text:I18n.t('Next week');iconOnly:true;symbol:'chevronRight';onClicked:calendar.weekOffset++}
+        Capsule {text:I18n.t('Next week');iconOnly:true;quiet:false;symbol:'chevronRight';onClicked:calendar.weekOffset++}
         Capsule {id:dateRange;width:230*Theme.textScale;text:I18n.locale.toString(new Date(calendar.dates[0]+'T12:00:00'),'d MMM')+' – '+I18n.locale.toString(new Date(calendar.dates[calendar.dates.length-1]+'T12:00:00'),'d MMM yyyy')+' ▾';onClicked:weekChooser.open()
             PlannerMenu {id:weekChooser;objectName:'plannerWeekMenu';y:dateRange.height;Repeater {model:17;PlannerMenuItem {required property int index;text:(index-8===0?I18n.t('Deze week · '):'')+I18n.locale.toString(new Date(calendar.baseDate.getTime()+(index-8)*7*86400000),'d MMM yyyy');onTriggered:calendar.weekOffset=index-8}}}
         }
@@ -112,7 +117,7 @@ ColumnLayout {
                                 width:Math.max(10,laneWidth-(flags.length&&!stackedFlag?flagWidth+3*Theme.textScale:0));height:Math.max(36*Theme.textScale,(modelData.end-modelData.start)/60*calendar.hourHeight-4)
                                 padding:6;clip:false;hoverEnabled:true
                                 Accessible.name:modelData.lesson.title+', '+modelData.lesson.meta+I18n.t('. Open lesson details')
-                                background:Rectangle {radius:3;color:lesson.hovered?Theme.selection:Theme.lesson;border.color:lesson.visualFocus?Theme.text:'transparent';border.width:lesson.visualFocus?2:0}
+                                background:Rectangle {radius:3;color:lesson.down?Qt.tint(Theme.lesson,Theme.alpha(Theme.blue,.24)):lesson.hovered?Theme.selection:Theme.lesson;border.color:lesson.visualFocus?Theme.text:'transparent';border.width:lesson.visualFocus?2:0}
                                 readonly property var flags:calendar.assignmentFlags(modelData.lesson)
                                 readonly property real flagWidth:Math.min(24*Theme.textScale,((dayColumn.width-6)/modelData.lanes-2)*.4)
                                 contentItem:Item {
@@ -169,5 +174,5 @@ ColumnLayout {
             }
         }
     }
-    SectionsView {app:calendar.app;visible:calendar.listMode;clip:true;Layout.fillWidth:true;Layout.fillHeight:true}
+    SectionsView {app:calendar.app;section:3;visible:calendar.listMode;clip:true;Layout.fillWidth:true;Layout.fillHeight:true}
 }

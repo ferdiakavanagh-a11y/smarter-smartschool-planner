@@ -8,7 +8,6 @@ import uuid
 
 import requests
 from PySide6.QtCore import QObject, Property, Signal, Slot, QTimer, QUrl, QDateTime, QDate, QTime, QTimeZone, Qt
-from smartschool import MessageComposerForm, RecipientType
 from .school_services import _school_url
 from .message_formatting import MessageFormatting, safe_html
 
@@ -42,6 +41,8 @@ def _sdk_recipients(form, query, coaccounts=False):
 
 
 def _search(session, query, coaccounts=False):
+    from smartschool import MessageComposerForm
+
     form = MessageComposerForm.create(session=session)
     available = form.can_send_to_coaccounts is True
     if coaccounts and not available:
@@ -139,6 +140,7 @@ def _schedule_time(value, *, future=True):
 
 def _scheduled_form(session):
     # Capture the SDK's existing GET; do not create a second school draft to check capability.
+    from smartschool import MessageComposerForm
     from smartschool._common import parse_smsc_vars
     class Capture:
         enabled = False
@@ -156,6 +158,8 @@ def _scheduled_form(session):
 
 
 def _send(session, selected, subject, body, current, attempt):
+    from smartschool import MessageComposerForm, RecipientType
+
     if not current(): raise ValueError('Account changed')
     scheduled = attempt.get('scheduleAt', '')
     if scheduled: _schedule_time(scheduled)

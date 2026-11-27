@@ -4,6 +4,9 @@ import QtQuick.Controls
 Menu {
     id:menu
     focus:true
+    popupType:Popup.Item
+    enter: Transition {NumberAnimation {property:'opacity';from:0;to:1;duration:Theme.motion?120:0;easing.type:Easing.OutCubic}}
+    exit: Transition {NumberAnimation {property:'opacity';to:0;duration:Theme.motion?85:0}}
     onOpened:{
         if (Theme.smartschool && currentIndex<0) {
             for (let i=0; i<count; i++) {
@@ -15,14 +18,14 @@ Menu {
             }
         }
     }
-    Binding {target:menu;property:'popupType';value:Popup.Item;when:Theme.smartschool}
-    padding:Theme.smartschool ? 5 : 0
-    margins:Theme.smartschool ? 6 : 0
-    background:Rectangle {
+    padding:Theme.fancy ? 7 : 5
+    margins:6
+    background:Surface {
         implicitWidth:200
         implicitHeight:40
-        radius:Theme.smartschool ? 8 : 0
-        color:Theme.smartschool ? Theme.elevated : menu.palette.window
-        border.color:Theme.smartschool ? (Theme.highContrast ? Theme.text : Theme.separator) : menu.palette.dark
+        radius:Theme.fancy ? 14 : 8
+        backdrop:null
+        color:Theme.fancy ? Theme.alpha(Theme.elevated,.98) : Theme.elevated
+        border.color:Theme.highContrast ? Theme.text : Theme.rim
     }
 }

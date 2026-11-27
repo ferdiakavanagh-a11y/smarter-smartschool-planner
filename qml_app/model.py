@@ -155,6 +155,8 @@ class Tasks(QAbstractListModel):
 
     @Slot(int)
     def setSection(self, section):
+        if section == self.section:
+            return
         self.section = section
         self.filter(*self.filters)
 

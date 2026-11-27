@@ -6,7 +6,7 @@ cd /d "%~dp0"
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python not found. Install Python 3.12 and tick "Add python.exe to PATH".
+    echo ERROR: Python not found. Install standard 64-bit Python 3.14 and make it available on PATH.
     pause
     exit /b 1
 )

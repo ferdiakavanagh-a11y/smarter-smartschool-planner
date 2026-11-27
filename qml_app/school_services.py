@@ -13,7 +13,6 @@ from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup
 import requests
-from smartschool import Attachments, BoxType, Courses, Message, MessageHeaders, MessageMoveToTrash, Periods, Reports, StudentSupportLinks
 from planner_details import html_to_text
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
@@ -42,6 +41,8 @@ def _records(values, limit=MAX_RECORDS):
 
 
 def _message_box(folder):
+    from smartschool import BoxType
+
     boxes = {'inbox': BoxType.INBOX, 'sent': BoxType.SENT, 'outbox': BoxType.SENT,
              'trash': BoxType.TRASH, 'draft': BoxType.DRAFT, 'scheduled': BoxType.SCHEDULED}
     if not isinstance(folder, str) or folder not in boxes:
@@ -50,11 +51,15 @@ def _message_box(folder):
 
 
 def _message_query(factory, session, folder, *args):
+    from smartschool import BoxType
+
     box = _message_box(folder)
     return factory(session, *args) if box is BoxType.INBOX else factory(session, *args, box_type=box)
 
 
 def fetch_messages(session, limit=50, folder='inbox'):
+    from smartschool import MessageHeaders
+
     if type(limit) is not int or not 1 <= limit <= MAX_RECORDS:
         raise ValueError('Invalid message limit')
     return [dict(id=_id(m.id), sender=_plain(getattr(m, 'from_', '')), subject=_plain(getattr(m, 'subject', '')),
@@ -70,6 +75,8 @@ def _message_attachment(message_id, item, folder='inbox'):
 
 
 def fetch_message(session, message_id, folder='inbox'):
+    from smartschool import Attachments, Message
+
     message_id = _id(message_id)
     message = _message_query(Message, session, folder, int(message_id)).get()
     if _id(message.id) != message_id:
@@ -90,6 +97,8 @@ class MessageMutationUncertain(RuntimeError):
 
 def trash_message(session, message_id, folder='inbox', current=None):
     """Use the SDK's verified quick-delete command once, never its retrying POST."""
+    from smartschool import BoxType, MessageHeaders, MessageMoveToTrash
+
     message_id = _id(message_id)
     if _message_box(folder) not in (BoxType.INBOX, BoxType.SENT):
         raise ValueError('Only Inbox and Sent messages can be moved to Trash')
@@ -207,6 +216,8 @@ def _report(item):
 
 
 def fetch_resources(session):
+    from smartschool import Periods, Reports
+
     result = dict(reports=[], periods=[], courses=[], support=[], homepage=[], errors={})
     sources = dict(
         reports=(Reports, _report),
@@ -364,6 +375,8 @@ def _directory(directory):
 
 def download(session, attachment, directory, cached=None):
     """Save an explicit file to a caller-owned account directory; never open or execute it."""
+    from smartschool import Attachments, Reports
+
     kind = attachment.get('kind')
     if kind == 'message':
         message_id, file_id = _id(attachment.get('messageId')), _id(attachment.get('id'))

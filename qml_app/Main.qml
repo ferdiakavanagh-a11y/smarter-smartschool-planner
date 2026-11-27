@@ -3,16 +3,20 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Dialogs
+import QtQuick.Shapes
 ApplicationWindow {
     id:app
-    readonly property bool production:typeof backend!=='undefined'
+    readonly property bool production:typeof backend!=='undefined' && backend!==null
+    readonly property bool starting:typeof backend!=='undefined' && backend===null
+    property bool workspaceLoadFailed:false
+    readonly property bool startupPageReady: pageViewport.selectedPage.status===Loader.Ready && (app.section>=2 || app.sceneReady)
     property bool preferencesReady:false
     property var taskInfo:({})
     property var sectionInfo:({})
     property string detailToken:''
     property string errorText:''
     width:1100;height:800;minimumWidth:focusPresented?360:760;minimumHeight:focusPresented?420:600
-    visible:false;title:I18n.t(production?'Smartschool Planner':'Smartschool Planner · demo');color:Theme.bg
+    visible:false;title:I18n.t(production||starting?'Smartschool Planner':'Smartschool Planner · demo');color:Theme.bg
     flags:Qt.Window | Qt.FramelessWindowHint | (focusPresented&&focusOnTop?Qt.WindowStaysOnTopHint:0)
     property alias sceneBackdrop:backdrop
     property alias controlsBackdrop:topSource
@@ -25,6 +29,39 @@ ApplicationWindow {
     property int fixtureRevision:0
     property var appearance:Theme
     property int section:0
+    readonly property var planner: tasksLoader.item
+    readonly property var sectionPages: section === 2 ? scheduleLoader.item
+        : !Theme.fancy ? null
+        : section === 3 ? sectionsLoader.item
+        : section === 4 ? glassResultsLoader.item
+        : section === 5 ? glassLvsLoader.item : null
+    readonly property var messagesPage: messagesLoader.item
+    readonly property var settings: settingsLoader.item
+    readonly property var notes: noteLoader.item
+    readonly property var details: detailLoader.item
+    readonly property var reports: reportLoader.item
+    readonly property var offlineFiles: offlineLoader.item
+    readonly property string workspaceAccount: production ? backend.features.accountKey : ''
+    onWorkspaceAccountChanged: {
+        if (notes) {
+            notes.editorText = ''
+            notes.close()
+        }
+        if (details) {
+            details.bodyText = ''
+            details.close()
+        }
+        reports?.close()
+        offlineFiles?.close()
+        taskInfo = ({})
+        sectionInfo = ({})
+        detailToken = ''
+    }
+    readonly property var filePreview: filePreviewLoader.item
+    property bool settingsRequested: false
+    property var pendingFilePreview: null
+    property string pendingMessageId: ""
+    property bool pendingMessageSearch: false
     readonly property var navigationSections:[0,3,4,5,6]
     property bool focusOpen:false
     property bool focusPresented:false
@@ -52,11 +89,36 @@ ApplicationWindow {
     property int transitionStep:0
     QtObject {id:themeProxy;property bool fancy:Theme.fancy;property bool reducedMotion:Theme.reducedMotion;property real textScale:Theme.textScale
         onFancyChanged:Theme.fancy=fancy;onReducedMotionChanged:Theme.reducedMotion=reducedMotion;onTextScaleChanged:Theme.textScale=textScale}
-    Component.onCompleted:{Theme.fancy=initialFancy;Theme.matched=typeof initialMatched!=='undefined'&&initialMatched;if(benchmarkEnabled||Theme.matched)Theme.scheme='light';if(Theme.matched)Theme.animatedBackground=false
-        if(production){let p=backend.settings;Theme.fancy=p.renderingMode!=='performance';Theme.style=p.style||'clear';Theme.scheme=p.scheme||'light';Theme.glassLevel=p.glassLevel===undefined?0:p.glassLevel;Theme.refractionLevel=p.distortion===undefined?.25:p.distortion;Theme.textScale=p.textSize||1;Theme.wallpaperIndex=p.wallpaperIndex===undefined?1:p.wallpaperIndex;Theme.reducedMotion=!!p.reducedMotion;Theme.animatedBackground=p.animatedBackground!==false;Theme.highContrast=!!p.highContrast;I18n.language=p.language||'en'}
-        preferencesReady=true
-        if(production&&backend.renderingChoicePending)Qt.callLater(settings.open)
+    function applyPreferences(p) {
+        Theme.fancy = p.renderingMode !== 'performance'
+        Theme.style = p.style || 'clear'
+        Theme.scheme = p.scheme || 'light'
+        Theme.glassLevel = p.glassLevel === undefined ? 0 : p.glassLevel
+        Theme.refractionLevel = p.distortion === undefined ? .25 : p.distortion
+        Theme.textScale = p.textSize || 1
+        Theme.wallpaperIndex = p.wallpaperIndex === undefined ? 1 : p.wallpaperIndex
+        Theme.reducedMotion = !!p.reducedMotion
+        Theme.animatedBackground = p.animatedBackground !== false
+        Theme.highContrast = !!p.highContrast
+        I18n.language = p.language || 'en'
     }
+    function checkRenderingChoice() {
+        if (production && backend.renderingChoicePending) openSettings()
+    }
+    Component.onCompleted: {
+        Theme.fancy = initialFancy
+        Theme.matched = typeof initialMatched !== 'undefined' && initialMatched
+        if (benchmarkEnabled || Theme.matched) Theme.scheme = 'light'
+        if (Theme.matched) Theme.animatedBackground = false
+        if (starting) applyPreferences(startupPreferences)
+        else if (production) applyPreferences(backend.settings)
+        preferencesReady = true
+        Qt.callLater(checkRenderingChoice)
+    }
+    onStartingChanged: if (!starting) Qt.callLater(function() {
+        pageViewport.selectedPage.openCurrentPage()
+        checkRenderingChoice()
+    })
     Timer{id:preferenceSave;interval:250;onTriggered:if(app.production&&app.preferencesReady)backend.saveSettings(app.preferences())}
     Connections {target:I18n;function onLanguageChanged(){preferenceSave.restart()}}
     Connections {target:Theme
@@ -66,9 +128,9 @@ ApplicationWindow {
     }
     Connections {target:app.production?backend:null
         function onChanged(){app.busy=backend.busy;Qt.callLater(app.showNotice)}
-        function onGroupsChanged(section){if(section<0&&app.detailToken.startsWith('notes:')){details.close();app.detailToken='';app.sectionInfo=({});detailsText.text=''}if(section<0||app.section===section)app.fixtureRevision++;if(section<0&&notes.visible&&notes.taskId)app.taskInfo=backend.taskDetail(notes.taskId)}
+        function onGroupsChanged(section){if(section<0&&app.detailToken.startsWith('notes:')){details?.close();app.detailToken='';app.sectionInfo=({});if(details)details.bodyText=''}if(section<0||app.section===section)app.fixtureRevision++;if(section<0&&notes?.visible&&notes.taskId)app.taskInfo=backend.taskDetail(notes.taskId)}
         function onError(message){app.errorText=message;errorSheet.open()}
-        function onDetailReady(token,info){if(details.visible&&token===app.detailToken){app.sectionInfo=info;detailsText.text=info.body}}
+        function onDetailReady(token,info){if(details?.visible&&token===app.detailToken){app.sectionInfo=info;details.bodyText=info.body}}
         function onQuitRequested(){app.close()}
     }
 
@@ -77,8 +139,12 @@ ApplicationWindow {
     font.family:Theme.fancy?'Segoe UI Variable':'Segoe UI';font.pixelSize:14*Theme.textScale
     palette.text:Theme.text;palette.windowText:Theme.text;palette.buttonText:Theme.text;palette.highlight:Theme.blue;palette.base:Theme.elevated;palette.button:Theme.surface;palette.window:Theme.bg
     function showNotice(){if(!production)return;if(backend.notice.text){if(!noticeSheet.opened)noticeSheet.open()}else noticeSheet.close()}
-    function searchFocus(){if(section===6)messagesPage.focusSearch();else search.forceActiveFocus()}
-    function toggleSearch(){if(section===6){messagesPage.focusSearch();return}searchOpen=!searchOpen;if(searchOpen)search.forceActiveFocus();else searchText=''}
+    function searchFocus(){
+        if(section!==6)search.forceActiveFocus()
+        else if(messagesPage)messagesPage.focusSearch()
+        else pendingMessageSearch=true
+    }
+    function toggleSearch(){if(section===6){searchFocus();return}searchOpen=!searchOpen;if(searchOpen)search.forceActiveFocus();else searchText=''}
     function requestAI(kind){
         if(!production)return
         if(!backend.features.aiAvailable){aiRequired.open();return}
@@ -92,17 +158,58 @@ ApplicationWindow {
         return item.mapToItem(floatingControls,0,0)
     }
     function notify(message,undo=true){toastText=message;toastUndo=undo;toastTimer.restart()}
-    function flushEdits(){return (!notes.visible||notes.beforeClose())&&messagesPage.flushDraft()&&(!production||backend.saveSettings(preferences()))}
-    function changeAccount(){if(flushEdits()){notes.close();focusOpen=false;backend.openSetup()}}
-    function syncNow(){if(flushEdits()){notes.close();backend.syncNow()}}
+    function flushEdits(){return (!notes?.visible||notes.beforeClose())&&(!production||backend.features.composer.flushForExit()&&backend.saveSettings(preferences()))}
+    function changeAccount(){if(flushEdits()){notes?.close();focusOpen=false;backend.openSetup()}}
+    function syncNow(){if(flushEdits()){notes?.close();backend.syncNow()}}
     function preferences(){return {language:I18n.language,renderingMode:Theme.fancy?'fancy':'performance',style:Theme.style,scheme:Theme.scheme,glassLevel:Theme.glassLevel,distortion:Theme.refractionLevel,textSize:Theme.textScale,wallpaperIndex:Theme.wallpaperIndex,reducedMotion:Theme.reducedMotion,animatedBackground:Theme.animatedBackground,highContrast:Theme.highContrast}}
     function showTask(id,title,note){
         taskInfo=production?backend.taskDetail(id):({})
         if(production&&Object.keys(taskInfo).length===0){errorText='This assignment is no longer available for editing. Sync again or open its lesson in Smartschool.';errorSheet.open();return}
-        notes.taskId=id;notes.taskTitle=title;noteText.text=note;notes.open()
+        const sheet = loadDialog(noteLoader, "TaskNoteSheet.qml")
+        if (!sheet) return
+        sheet.taskId = id
+        sheet.taskTitle = title
+        sheet.editorText = note
+        sheet.open()
     }
-    function openSection(item){sectionInfo=item;detailToken=item.id;details.title=details.lessonDetails?item.lessonTitle:item.title;detailsText.text=details.lessonDetails?item.lessonContent:item.body;details.open();if(item.kind==='notes'){let cached=backend.noteDetails[item.id];if(cached){backend.markRead(item.id);sectionInfo=cached;detailsText.text=cached.body}else{detailsText.text=I18n.t('Loading note…');backend.openNote(item.id.slice(6))}}else if(item.kind==='absences')backend.markRead(item.id)}
-    function pickSection(i){focusOpen=false;if(i===5&&section===5)sectionPages.requestTop();section=i}
+    function loadDialog(loader, source, properties) {
+        if (!loader.item)
+            loader.setSource(source, Object.assign({app:app, parent:app.contentItem}, properties || {}))
+        return loader.item
+    }
+    function showDetail(title, body) {
+        const sheet = loadDialog(detailLoader, "SectionDetailSheet.qml")
+        if (!sheet) return false
+        sheet.title = title || ''
+        sheet.bodyText = body || ''
+        sheet.open()
+        return true
+    }
+    function openSection(item) {
+        sectionInfo = item
+        detailToken = item.id
+        const lesson = item.kind === 'lesson'
+        if (!showDetail(lesson ? item.lessonTitle : item.title, lesson ? item.lessonContent : item.body)) return
+        if (item.kind === 'notes') {
+            const cached = backend.noteDetails[item.id]
+            if (cached) {
+                backend.markRead(item.id)
+                sectionInfo = cached
+                details.bodyText = cached.body
+            } else {
+                details.bodyText = I18n.t('Loading note…')
+                backend.openNote(item.id.slice(6))
+            }
+        } else if (item.kind === 'absences') {
+            backend.markRead(item.id)
+        }
+    }
+    function pickSection(i){focusOpen=false;if(i===5&&section===5&&sectionPages)sectionPages.requestTop();section=i}
+    function openSourceMessage(id){
+        pickSection(6)
+        if(messagesPage)messagesPage.readMessage(id)
+        else pendingMessageId=id
+    }
     onSectionChanged:if(section===3||section>=6){headerCollapsed=false;searchOpen=false;settleHeader()}
     // Snap interrupted scroll motion before measuring a newly entered page.
     function settleHeader(){headerMotion.complete();headerFrame.Layout.preferredHeight=Qt.binding(function(){return app.headerCollapsed&&!app.searchOpen?0:headerFrame.implicitHeight});content.ensurePolished()}
@@ -112,14 +219,72 @@ ApplicationWindow {
         focusOnTop=false;focusPresented=false
         if(wasMaximized)showMaximized()
     }
+    function openSettings(){
+        if (settings) settings.open()
+        else {
+            settingsRequested = true
+            if (settingsLoader.status !== Loader.Loading)
+                settingsLoader.setSource("SettingsPanel.qml", {app:app, backdrop:backdrop, parent:app.contentItem, objectName:"settingsPanel"})
+        }
+    }
+    function loadFocus(){
+        if(!focusLoader.item)
+            focusLoader.setSource("FocusView.qml", {app:app, backdrop:backdrop})
+        return focusLoader.item
+    }
+    function openFocus(id,title,done){
+        const view=loadFocus()
+        view.taskId=id
+        view.taskTitle=title
+        view.completed=done
+        focusOpen=true
+    }
     onFocusOpenChanged:{
         if(focusOpen&&!focusPresented){
+            loadFocus()
             savedBounds=Qt.rect(x,y,width,height);wasMaximized=visibility===Window.Maximized
             focusPresented=true;showNormal();width=420;height=560
             stopwatch.reset();stopwatch.toggle()
         }else if(!focusOpen&&focusReveal===0)restoreFocusBounds()
     }
-    onClosing:close=>{if(!flushEdits()){close.accepted=false;if(notes.visible)noteText.forceActiveFocus();else messagesPage.focusDraft()}}
+    onClosing:close=>{if(!flushEdits()){close.accepted=false;if(notes?.visible)notes.focusEditor();else if(messagesPage)messagesPage.focusDraft()}}
+    component PageLoader: Loader {
+        id: pageLoader
+        required property string page
+        required property bool current
+        property var properties: ({app: app})
+        asynchronous: !benchmarkEnabled
+        visible: current && status === Loader.Ready
+
+        function loadPage() {
+            if (!app.starting && status === Loader.Null)
+                setSource(page, properties)
+        }
+        Component.onCompleted: if(current)loadPage()
+        function openCurrentPage() {
+            if (app.starting || !current || status === Loader.Ready) return
+            if (pageViewport.selectedPage === pageLoader && app.section >= 2) {
+                // Give the requested page priority over its idle load.
+                if (status === Loader.Loading) source = ""
+                asynchronous = false
+            }
+            loadPage()
+        }
+        onCurrentChanged: if(current)Qt.callLater(openCurrentPage)
+    }
+    Timer {
+        id: backgroundPages
+        interval: 120
+        repeat: true
+        readonly property var pages: Theme.fancy ? [messagesLoader, sectionsLoader, glassResultsLoader, glassLvsLoader]
+                                                  : [messagesLoader, timetableLoader, resultsLoader, lvsLoader]
+        running: (app.sceneReady || app.section >= 2) && app.renderActive && pageViewport.selectedPage.status === Loader.Ready
+                 && pages.some(page => page.status === Loader.Null)
+        onTriggered: {
+            if (!pages.some(page => page.status === Loader.Loading))
+                pages.find(page => page.status === Loader.Null)?.loadPage()
+        }
+    }
     Item {id:plannerScene;anchors.fill:parent
     Wallpaper {id:backdrop;objectName:'backdrop';anchors.fill:parent;animate:Theme.fancy&&Theme.animatedBackground&&!Theme.reducedMotion&&!app.focusPresented&&app.active&&!app.busy}
     Item {
@@ -191,7 +356,7 @@ ApplicationWindow {
         readonly property real topHeight:56*Theme.textScale
         readonly property bool compact:app.width<1000*Theme.textScale
         readonly property bool tight:app.width<850*Theme.textScale
-        readonly property string accountLabel:app.production?(backend.accountName||I18n.p('Your account','Je account')):'Sam Example'
+        readonly property string accountLabel:app.starting?I18n.p('Your account','Je account'):app.production?(backend.accountName||I18n.p('Your account','Je account')):'Sam Example'
         readonly property var navigation:[{label:'Mijn taken',shortEn:'Tasks',shortNl:'Taken',section:0},{label:'Planner',section:3},{label:'Resultaten',shortEn:'Results',shortNl:'Cijfers',section:4},{label:'LVS',section:5},{label:'Berichten',shortEn:'Mail',shortNl:'Berichten',section:6}]
         MouseArea {anchors.fill:parent;onPressed:app.startSystemMove()}
         RowLayout {id:navigationBar;objectName:'smartschoolNavigation';Layout.minimumWidth:implicitWidth;Layout.preferredWidth:implicitWidth;Layout.preferredHeight:44*Theme.textScale;spacing:globalBar.compact?2:4
@@ -211,7 +376,7 @@ ApplicationWindow {
         }
         RowLayout {anchors.top:parent.top;anchors.left:parent.left;anchors.right:parent.right;height:globalBar.topHeight;anchors.leftMargin:12;anchors.rightMargin:captionButtons.width+captionButtons.anchors.rightMargin+6;spacing:globalBar.compact?2:6
             Rectangle {objectName:'accountAvatar';Layout.minimumWidth:30;implicitWidth:30;implicitHeight:30;radius:15;color:'#F0D6CF';Accessible.name:globalBar.accountLabel
-                Text {anchors.centerIn:parent;text:app.production?backend.accountInitial:'S';color:'#713326';font.bold:true;font.pixelSize:13*Theme.textScale}
+                Text {anchors.centerIn:parent;text:app.starting?'?':app.production?backend.accountInitial:'S';color:'#713326';font.bold:true;font.pixelSize:13*Theme.textScale}
             }
             Label {id:accountNameLabel;objectName:'accountNameLabel';Layout.minimumWidth:globalBar.compact?42:60;Layout.preferredWidth:implicitWidth;text:globalBar.accountLabel;textFormat:Text.PlainText;elide:Text.ElideRight;color:'white';font.pixelSize:(globalBar.compact?12:14)*Theme.textScale;font.weight:Font.Medium;Layout.maximumWidth:globalBar.tight?110*Theme.textScale:Math.min(240,app.width*.22)
                 HoverHandler {id:accountNameHover}
@@ -220,9 +385,9 @@ ApplicationWindow {
             Item {Layout.fillWidth:true}
             LayoutItemProxy {target:navigationBar;visible:!globalBar.stackNavigation}
             GlobalAction {objectName:'globalSearch';text:I18n.t('Search');symbol:'searchBtn';onClicked:app.toggleSearch()}
-            GlobalAction {objectName:'globalSettings';text:I18n.t('Settings');symbol:'settingsBtn';onClicked:settings.open()}
-            GlobalAction {id:globalSync;objectName:'globalSync';text:I18n.t('Sync now');symbol:'syncBtn';spinning:app.busy;enabled:app.section!==6||messagesPage.canRefresh;onClicked:app.section===6?messagesPage.refreshMessages():app.production?app.syncNow():refreshTimer.restart()}
-            GlobalAction {objectName:'globalReplacements';text:I18n.t('Teacher replacements');symbol:'teacherOff';onClicked:app.showReplacements()}
+            GlobalAction {objectName:'globalSettings';text:I18n.t('Settings');symbol:'settingsBtn';enabled:!app.starting;onClicked:app.openSettings()}
+            GlobalAction {id:globalSync;objectName:'globalSync';text:I18n.t('Sync now');symbol:'syncBtn';spinning:app.busy;enabled:!app.starting&&(app.section!==6||!!messagesPage&&messagesPage.canRefresh);onClicked:app.section===6?messagesPage.refreshMessages():app.production?app.syncNow():refreshTimer.restart()}
+            GlobalAction {objectName:'globalReplacements';text:I18n.t('Teacher replacements');symbol:'teacherOff';enabled:!app.starting;onClicked:app.showReplacements()}
         }
     }
     ColumnLayout {
@@ -231,13 +396,13 @@ ApplicationWindow {
         x:Theme.fancy?20:(app.width<1000?12:20)*Theme.textScale;y:Theme.fancy?24:globalBar.height+12*Theme.textScale;width:(app.focusPresented?app.savedBounds.width:app.width)-2*x;height:(app.focusPresented?app.savedBounds.height:app.height)-y-(Theme.fancy?0:12*Theme.textScale);spacing:Theme.fancy?6:4
         Item {id:headerFrame;visible:Theme.fancy||app.section<3;Layout.fillWidth:true;implicitHeight:(Theme.fancy?75:52)*Theme.textScale;Layout.preferredHeight:Theme.fancy&&app.headerCollapsed&&!app.searchOpen?0:implicitHeight;clip:app.headerCollapsed;z:3
             opacity:Theme.fancy&&app.headerCollapsed&&!app.searchOpen?0:1
-            Behavior on opacity{enabled:!planner.entryPending&&!sectionPages.topResetPending;NumberAnimation{duration:Theme.motion?200:0}}
-            Behavior on Layout.preferredHeight{enabled:Theme.motion&&(app.section<2?!planner.entryPending:!sectionPages.topResetPending);NumberAnimation{id:headerMotion;duration:220;easing.type:Easing.OutCubic}}
+            Behavior on opacity{enabled:(!planner||!planner.entryPending)&&(!sectionPages||!sectionPages.topResetPending);NumberAnimation{duration:Theme.motion?200:0}}
+            Behavior on Layout.preferredHeight{enabled:Theme.motion&&(app.section<2?(!planner||!planner.entryPending):(!sectionPages||!sectionPages.topResetPending));NumberAnimation{id:headerMotion;duration:220;easing.type:Easing.OutCubic}}
             Item {anchors.fill:parent;anchors.leftMargin:0;anchors.rightMargin:0
                 ColumnLayout {anchors.left:parent.left;anchors.right:headerSlot.left;anchors.rightMargin:16;anchors.verticalCenter:parent.verticalCenter;spacing:3
                     Label {textFormat:Text.PlainText;text:I18n.t((Theme.fancy?['To-do','Overdue','Planner','Planner','Grades','LVS','Messages']:['Mijn taken','Gemist','Planner','Planner','Resultaten','LVS','Berichten'])[app.section]||'To-do');font.pixelSize:(Theme.fancy?34:21)*Theme.textScale;font.bold:Theme.fancy;color:Theme.text
                         MouseArea {anchors.fill:parent;onPressed:app.startSystemMove()} }
-                    Label {id:syncStatus;visible:Theme.fancy;objectName:'syncStatus';Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText;text:I18n.t(app.production?backend.status:'Last synced · 24 Oct, 09:00 · Synthetic workspace');font.pixelSize:13*Theme.textScale;color:Theme.secondary
+                    Label {id:syncStatus;visible:Theme.fancy;objectName:'syncStatus';Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText;text:app.starting?'':I18n.t(app.production?backend.status:'Last synced · 24 Oct, 09:00 · Synthetic workspace');font.pixelSize:13*Theme.textScale;color:Theme.secondary
                         HoverHandler {id:statusHover}
                         GlassToolTip {requested:syncStatus.truncated&&statusHover.hovered;text:syncStatus.text}
                     }
@@ -247,26 +412,38 @@ ApplicationWindow {
                 readonly property point origin:app.controlPosition(headerSlot)
                 x:origin.x;y:origin.y;opacity:headerFrame.opacity;visible:Theme.fancy&&!app.focusPresented&&opacity>0
                 Capsule {selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;text:I18n.t('Search');symbol:'searchBtn';iconOnly:true;visible:app.section<7;onClicked:app.toggleSearch()}
-                Capsule {id:syncControl;objectName:'syncButton';selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;text:I18n.t(app.production?'Sync now':'Refresh synthetic data');symbol:'syncBtn';iconOnly:true;onClicked:{if(app.production){app.syncNow()}else{app.busy=true;refreshTimer.restart()}}
+                Capsule {id:syncControl;objectName:'syncButton';selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;text:I18n.t(app.production||app.starting?'Sync now':'Refresh synthetic data');symbol:'syncBtn';iconOnly:true;enabled:!app.starting;onClicked:{if(app.production){app.syncNow()}else{app.busy=true;refreshTimer.restart()}}
                     contentItem:Item {implicitWidth:20;implicitHeight:20
                         Icon {id:syncGlyph;objectName:'syncGlyph';anchors.centerIn:parent;width:20*Theme.textScale;height:20*Theme.textScale;name:'syncBtn';ink:syncControl.labelInk
                             RotationAnimator on rotation {objectName:'syncSpin';from:0;to:360;duration:900;loops:Animation.Infinite;running:syncControl.visible&&app.busy&&app.renderActive&&app.active&&Theme.motion;onStopped:syncGlyph.rotation=0}}
                     }}
-                Capsule {selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;objectName:'settingsButton';text:I18n.t('Settings');symbol:'settingsBtn';iconOnly:true;onClicked:settings.open()}
+                Capsule {selectorMaterial:true;backdrop:topSource;glassTracking:headerActions.x+headerActions.y; width:38;objectName:'settingsButton';text:I18n.t('Settings');symbol:'settingsBtn';iconOnly:true;enabled:!app.starting;onClicked:app.openSettings()}
                 }
                 }
             }
         }
         Capsule {objectName:'warningsButton';visible:app.production&&backend.warnings!=='';Layout.alignment:Qt.AlignLeft;text:I18n.t('Sync warnings');symbol:'warn';onClicked:warningsSheet.open()}
-        TextField {id:search;objectName:'search';Layout.fillWidth:true;visible:app.searchOpen&&app.section<6;implicitHeight:44;text:app.searchText;onTextChanged:app.searchText=text
+        TextField {id:search;objectName:'search';Layout.fillWidth:true;visible:app.searchOpen&&app.section<6;implicitWidth:1;implicitHeight:44;text:app.searchText;onTextChanged:app.searchText=text
             placeholderText:I18n.t(['Search tasks…','Search missed tasks…','Search schedule…','Search all classes…','Search grades…','Search LVS…'][app.section]||'');Accessible.name:I18n.t('Search current tab');color:Theme.text;placeholderTextColor:Theme.secondary;leftPadding:18;selectByMouse:true
             background:Surface{radius:Theme.fancy?22:3;border.color:search.activeFocus?Theme.blue:Theme.rim}
             Keys.onEscapePressed:{app.searchOpen=false;app.searchText=''}
         }
-        Item {objectName:'pageViewport';clip:app.section===3||!app.headerCollapsed||app.searchOpen;Layout.fillWidth:true;Layout.fillHeight:true
-        PlannerView {id:planner;app:app;anchors.fill:parent;visible:app.section<2
-            onFocusTask:(id,title,done)=>{focusView.taskId=id;focusView.taskTitle=title;focusView.completed=done;app.focusOpen=true}
-            onEditNote:(id,title,note)=>app.showTask(id,title,note)
+        Item {id:pageViewport;objectName:'pageViewport';clip:app.section===3||!app.headerCollapsed||app.searchOpen;Layout.fillWidth:true;Layout.fillHeight:true
+        readonly property var selectedPage: app.section<2 ? tasksLoader
+            : app.section===6 ? messagesLoader
+            : app.section===2 ? scheduleLoader
+            : app.section===3 ? (Theme.fancy ? sectionsLoader : timetableLoader)
+            : app.section===4 ? (Theme.fancy ? glassResultsLoader : resultsLoader)
+            : Theme.fancy ? glassLvsLoader : lvsLoader
+        readonly property bool loading: !app.workspaceLoadFailed
+            && (selectedPage.status === Loader.Loading || selectedPage.status === Loader.Null
+                || app.settingsRequested || !!app.pendingFilePreview
+                || (app.section===6 && !!(app.messagesPage?.composerLoading || app.messagesPage?.waitingForMessages)))
+        onLoadingChanged: if(!loading)pageSpinner.showRing=false
+        PageLoader {id:tasksLoader;page:"PlannerView.qml";anchors.fill:parent;current:app.section<2}
+        Connections {target:app.planner
+            function onFocusTask(id,title,done){app.openFocus(id,title,done)}
+            function onEditNote(id,title,note){app.showTask(id,title,note)}
         }
         ColumnLayout {anchors.fill:parent;spacing:Theme.fancy?15:0;visible:app.section>=2&&app.section<6
             RowLayout {Layout.fillWidth:true;visible:Theme.fancy&&app.production&&app.section===3
@@ -274,34 +451,96 @@ ApplicationWindow {
                 Item {Layout.fillWidth:true}
             }
             Item {Layout.fillWidth:true;Layout.fillHeight:true;clip:app.section===3
-                TimetableView {app:app;anchors.fill:parent;visible:app.section===3&&!Theme.fancy}
-                SectionsView {id:sectionPages;app:app;anchors.fill:parent;visible:Theme.fancy||app.section===2;anchors.leftMargin:Theme.fancy?-16:0;anchors.rightMargin:Theme.fancy?-16:app.section===4||app.section===5?parent.width*.55+8:0;onDetail:(title,body)=>{details.title=title;detailsText.text=body;details.open()}}
-                ResultsLvsView {app:app;anchors.fill:parent;visible:!Theme.fancy&&(app.section===4||app.section===5)}
-                Rectangle {id:sectionPreview;visible:false;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.right:parent.right;width:parent.width*.55;color:Theme.elevated;border.color:Theme.separator
-                    readonly property var entry:sectionPages.previewItem
-                    ScrollView {id:sectionPreviewScroll;anchors.fill:parent;anchors.margins:18;clip:true;contentWidth:availableWidth
-                        ColumnLayout {width:sectionPreviewScroll.availableWidth;spacing:16
-                            Label {text:I18n.t(app.section===4?'Result details':'Student follow-up');color:Theme.secondary;Layout.fillWidth:true;wrapMode:Text.Wrap;font.pixelSize:12*Theme.textScale}
-                            Label {text:sectionPreview.entry.title||I18n.t('Select an item');textFormat:Text.PlainText;color:Theme.text;Layout.fillWidth:true;wrapMode:Text.Wrap;font.pixelSize:22*Theme.textScale;font.bold:true}
-                            Rectangle {visible:app.section===4;Layout.alignment:Qt.AlignHCenter;implicitWidth:100*Theme.textScale;implicitHeight:100*Theme.textScale;radius:width/2;color:Theme.elevated;border.width:6;border.color:sectionPreview.entry.tone==='green'?Theme.green:sectionPreview.entry.tone==='orange'?Theme.orange:sectionPreview.entry.tone==='red'?Theme.red:Theme.blue
-                                Label {anchors.fill:parent;anchors.margins:10;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;wrapMode:Text.Wrap;text:sectionPreview.entry.percentText||sectionPreview.entry.extra||sectionPreview.entry.title||'—';textFormat:Text.PlainText;color:Theme.text;font.pixelSize:19*Theme.textScale;font.bold:true}
-                            }
-                            Label {text:sectionPreview.entry.meta||'';textFormat:Text.PlainText;color:Theme.secondary;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                            Rectangle {Layout.fillWidth:true;height:1;color:Theme.separator}
-                            TextArea {text:sectionPreview.entry.body||I18n.t('Choose an item from the list to see its saved details.');textFormat:TextEdit.PlainText;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;color:Theme.text;Layout.fillWidth:true;background:Item {}}
-                            Capsule {text:I18n.t('Open details');enabled:!!sectionPreview.entry.id;onClicked:app.openSection(sectionPreview.entry)}
+                PageLoader {id:timetableLoader;page:"TimetableView.qml";anchors.fill:parent;current:app.section===3&&!Theme.fancy}
+                component ListPage: PageLoader {
+                    required property int section
+                    page: "SectionsView.qml"
+                    properties: ({app: app, section: section})
+                    anchors.fill: parent
+                    anchors.leftMargin: Theme.fancy ? -16 : 0
+                    anchors.rightMargin: Theme.fancy ? -16 : 0
+                }
+                ListPage {id:scheduleLoader;section:2;current:app.section===2}
+                ListPage {id:sectionsLoader;section:3;current:Theme.fancy&&app.section===3}
+                ListPage {id:glassResultsLoader;section:4;current:Theme.fancy&&app.section===4}
+                ListPage {id:glassLvsLoader;section:5;current:Theme.fancy&&app.section===5}
+                Connections {target:app.sectionPages
+                    function onDetail(title,body){app.showDetail(title,body)}
+                }
+                PageLoader {id:resultsLoader;page:"ResultsLvsView.qml";anchors.fill:parent;current:!Theme.fancy&&app.section===4;properties:({app:app, grades:true})}
+                PageLoader {id:lvsLoader;page:"ResultsLvsView.qml";anchors.fill:parent;current:!Theme.fancy&&app.section===5;properties:({app:app, grades:false})}
+            }
+        }
+        PageLoader {id:messagesLoader;page:"MessagesView.qml";anchors.fill:parent;current:app.section===6
+            onLoaded: {
+                if (current && app.pendingMessageId)
+                    item.readMessage(app.pendingMessageId)
+                if (current && app.pendingMessageSearch)
+                    item.focusSearch()
+                app.pendingMessageId = ""
+                app.pendingMessageSearch = false
+            }
+        }
+        BusyIndicator {
+            id: pageSpinner
+            property bool showRing: false
+            objectName: "pageLoadingIndicator"
+            anchors.centerIn: parent
+            width: 36 * Theme.textScale
+            height: width
+            padding: 0
+            running: pageViewport.loading && showRing
+            visible: running
+            Accessible.name: I18n.p("Loading page…", "Pagina laden…")
+            contentItem: Item {
+                Rectangle {
+                    anchors.fill: parent
+                    radius: width / 2
+                    color: "transparent"
+                    border.width: 3 * Theme.textScale
+                    border.color: Theme.alpha(Theme.blue, .22)
+                }
+                Shape {
+                    id: spinnerArc
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        fillColor: "transparent"
+                        strokeColor: Theme.blue
+                        strokeWidth: 3 * Theme.textScale
+                        capStyle: ShapePath.RoundCap
+                        PathAngleArc {
+                            centerX: spinnerArc.width / 2
+                            centerY: spinnerArc.height / 2
+                            radiusX: centerX - 1.5 * Theme.textScale
+                            radiusY: radiusX
+                            startAngle: -90
+                            sweepAngle: 105
                         }
+                    }
+                    RotationAnimator on rotation {
+                        from: 0
+                        to: 360
+                        duration: 900
+                        loops: Animation.Infinite
+                        running: pageSpinner.running && app.renderActive && Theme.motion
                     }
                 }
             }
         }
-        MessagesView {id:messagesPage;app:app;anchors.fill:parent;visible:app.section===6}
+        Timer { interval: 120; running: pageViewport.loading; onTriggered: pageSpinner.showRing=true }
+        Label {
+            anchors.centerIn: parent
+            visible: app.workspaceLoadFailed || pageViewport.selectedPage.status === Loader.Error
+            text: I18n.p("This page could not be loaded.", "Deze pagina kon niet worden geladen.")
+            color: Theme.text
+        }
         }
     }
     }
     // One bounded capture for the floating controls; those controls live outside its source.
     ShaderEffectSource {id:topSource;objectName:'topControlSource';visible:false
-        width:app.width;height:Math.min(app.height,(app.headerCollapsed?112:220)*Theme.textScale+(planner.typeMenuVisible||sectionPages.courseMenuVisible?240:0))
+        width:app.width;height:Math.min(app.height,(app.headerCollapsed?112:220)*Theme.textScale+(planner?.typeMenuVisible||sectionPages?.courseMenuVisible?240:0))
         sourceItem:Theme.fancy&&app.renderActive&&!app.focusPresented&&!Theme.highContrast?plannerScene:null
         sourceRect:Qt.rect(0,0,width,height);textureSize:Qt.size(Math.ceil(width*(Theme.fancy?1:.65)),Math.ceil(height*(Theme.fancy?1:.65)))
         hideSource:false;live:app.renderActive&&!app.focusPresented;mipmap:true;smooth:true
@@ -318,17 +557,53 @@ ApplicationWindow {
         x:Theme.fancy?(parent.width-width)/2:12;y:Theme.fancy?parent.height-height-10:32;width:Theme.fancy?Math.min(parent.width-32,540*Theme.textScale):Math.min(parent.width-24,720*Theme.textScale);height:(Theme.fancy?74:44)*Theme.textScale
         backdrop:dockSource;labels:(['To-do','Planner','Grades','LVS','Messages']).map(value=>I18n.t(value));symbols:['todo','schedule','grades','lvs','message'];unreadCount:app.production?backend.unreadCount:0;unreadIndex:3;current:Math.max(0,app.navigationSections.indexOf(app.section));onPicked:i=>app.pickSection(app.navigationSections[i])
     }
-    FocusView {id:focusView;app:app;backdrop:backdrop;anchors.fill:parent;visible:app.focusPresented;opacity:app.focusReveal
+    Loader {id:focusLoader;anchors.fill:parent;visible:app.focusPresented;opacity:app.focusReveal
         scale:Theme.reducedMotion?1:.97+.03*app.focusReveal
-        transform:Translate {y:Theme.reducedMotion?0:10*(1-app.focusReveal)}
-        onLeave:app.focusOpen=false}
-    SettingsPanel {id:settings;objectName:'settingsPanel';app:app;backdrop:backdrop}
-    function showOfflineFiles(){offlineFiles.open()}
-    function showReports(){reports.open()}
-    FilePreview {id:filePreview;service:app.production?backend.features:null}
+        transform:Translate {y:Theme.reducedMotion?0:10*(1-app.focusReveal)}}
+    Connections {target:focusLoader.item;function onLeave(){app.focusOpen=false}}
+    Loader {
+        id:settingsLoader
+        asynchronous:true
+        onLoaded: {
+            if (app.settingsRequested) item.open()
+            app.settingsRequested = false
+        }
+        onStatusChanged: if (status === Loader.Error && app.settingsRequested) {
+            app.settingsRequested = false
+            app.notify(I18n.p("Settings could not open.", "Instellingen konden niet worden geopend."), false)
+        }
+    }
+    Loader {id:noteLoader}
+    Loader {id:detailLoader}
+    Loader {id:reportLoader}
+    Loader {id:offlineLoader}
+    function showOfflineFiles(){loadDialog(offlineLoader,"ResourceSheet.qml",{offlineOnly:true})?.open()}
+    function showReports(){loadDialog(reportLoader,"ResourceSheet.qml")?.open()}
+    Loader {
+        id:filePreviewLoader
+        asynchronous:true
+        onLoaded: {
+            if (app.pendingFilePreview) item.present(app.pendingFilePreview)
+            app.pendingFilePreview = null
+        }
+        onStatusChanged: if (status === Loader.Error && app.pendingFilePreview) {
+            app.pendingFilePreview = null
+            app.notify(I18n.p("File preview could not open.", "Bestandsvoorbeeld kon niet worden geopend."), false)
+        }
+    }
     Connections {target:app.production?backend.features:null
-        function onFilePreviewRequested(info){filePreview.present(info)}
-        function onCloseFilePreview(){filePreview.clearAndClose()}
+        function onFilePreviewRequested(info){
+            if (filePreview) filePreview.present(info)
+            else {
+                app.pendingFilePreview = info
+                if (filePreviewLoader.status !== Loader.Loading)
+                    filePreviewLoader.setSource("FilePreview.qml", {service:backend.features, parent:app.contentItem})
+            }
+        }
+        function onCloseFilePreview(){
+            app.pendingFilePreview = null
+            filePreview?.clearAndClose()
+        }
     }
     function showReplacements(){replacements.open()}
     function showTaskCollection(collection){taskCollection.collection=collection;taskCollection.open()}
@@ -348,14 +623,6 @@ ApplicationWindow {
             function onChanged(){if(replacements.visible&&backend.features.accountKey!==replacements.viewingAccount)replacements.close()}
         }
     }
-    Sheet {id:reports;objectName:'reportCards';title:I18n.t('Report cards')
-        implicitHeight:Math.min(620*Theme.textScale,app.height*.8)
-        ResourcesView {app:app;Layout.fillWidth:true;Layout.preferredHeight:Math.max(160,reports.scrollView.height-24)}
-    }
-    Sheet {id:offlineFiles;objectName:'offlineFiles';title:I18n.t('Offline files')
-        implicitHeight:Math.min(560*Theme.textScale,app.height*.75)
-        ResourcesView {app:app;offlineOnly:true;Layout.fillWidth:true;Layout.preferredHeight:Math.max(160,offlineFiles.scrollView.height-24)}
-    }
     Sheet {id:aiRequired;objectName:'aiRequired';title:I18n.t('AI required')
         Label {textFormat:Text.PlainText;text:I18n.t('AI requires a Gemini API key. Add one in Settings → Change login details.');color:Theme.text;Layout.fillWidth:true;wrapMode:Text.Wrap}
     }
@@ -364,175 +631,6 @@ ApplicationWindow {
     }
     Connections {target:app.production?backend.features:null
         function onSaveRequested(key,url){saveFile.downloadKey=key;saveFile.selectedFile=url;saveFile.open()}
-    }
-    Sheet {
-        id:notes;objectName:'noteDialog';property string taskId:'';property string taskTitle:''
-        title:Theme.fancy?I18n.t('Task details'):notes.taskTitle
-        headingColor:Theme.fancy?Theme.elevated:Theme.lesson
-        width:Theme.fancy?Math.min(820*Theme.textScale,parent.width-24):app.width>1150?Math.min(1180*Theme.textScale,app.width-470):parent.width-28
-        x:!Theme.fancy&&app.width>1150?app.width-width-48:(parent.width-width)/2
-        implicitHeight:parent.height*.9
-        readonly property var taskDate:(app.taskInfo.facts||[]).find(f=>f.label==='Due')
-        readonly property var contextDays:{let revision=app.fixtureRevision;return app.production?backend.groups(3,'','All subjects'):[]}
-        readonly property var dayContext:contextDays.find(day=>day.items.some(lesson=>(lesson.assignments||[]).some(task=>task.id===notes.taskId)))||contextDays[0]||{heading:'Mijn planner',items:[]}
-        beforeClose:function(){if(noteText.length>5000){noteError.text='Your note is too long. Shorten it to keep your changes.';return false}return tasks.change(taskId,'note',noteText.text)}
-        footer:Component {Rectangle {implicitHeight:44*Theme.textScale;color:Theme.fill;border.color:Theme.separator
-            RowLayout {anchors.fill:parent;anchors.leftMargin:14;anchors.rightMargin:14
-                Label {Layout.fillWidth:true;text:(app.taskInfo.facts||[]).filter(f=>f.label==='Posted').map(f=>I18n.p('Published','Gepubliceerd')+' '+f.value).join('');color:Theme.secondary;font.pixelSize:10*Theme.textScale;elide:Text.ElideRight}
-                Capsule {visible:Theme.fancy;text:I18n.t('Bewaren en sluiten');primary:true;onClicked:notes.dismiss()}
-            }
-        }}
-        RowLayout {Layout.fillWidth:true;spacing:18;Layout.alignment:Qt.AlignTop
-            Rectangle {visible:false;Layout.preferredWidth:notes.width*.26;Layout.preferredHeight:Math.max(450,notes.scrollView.height-24);Layout.alignment:Qt.AlignTop;color:Theme.elevated;border.color:Theme.separator;radius:4
-                ColumnLayout {anchors.fill:parent;anchors.margins:12;spacing:8
-                    Label {text:I18n.t('Mijn planner');color:Theme.secondary;font.pixelSize:20*Theme.textScale}
-                    Label {text:I18n.t(notes.dayContext.heading||'');color:Theme.text;font.pixelSize:12*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap;Layout.bottomMargin:12}
-                    Repeater {model:notes.dayContext.items
-                        Rectangle {required property var modelData;Layout.fillWidth:true;implicitHeight:Math.max(66,contextText.implicitHeight+16);radius:3;color:Theme.lesson
-                            ColumnLayout {id:contextText;anchors.fill:parent;anchors.margins:8;spacing:3
-                                Label {text:parent.parent.modelData.meta.split(' · ')[0];color:Theme.secondary;font.pixelSize:10*Theme.textScale}
-                                Label {text:parent.parent.modelData.title;textFormat:Text.PlainText;color:Theme.text;font.bold:true;font.pixelSize:12*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                                Label {text:parent.parent.modelData.extra||'';textFormat:Text.PlainText;color:Theme.text;font.pixelSize:11*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight}
-                                TapHandler {onTapped:app.openSection(parent.parent.modelData)}
-                            }
-                        }
-                    }
-                    Item {Layout.fillHeight:true}
-                }
-            }
-            ColumnLayout {Layout.fillWidth:true;Layout.alignment:Qt.AlignTop;spacing:12
-                Rectangle {visible:!Theme.fancy;Layout.fillWidth:true;implicitHeight:28*Theme.textScale;color:Theme.dark?'#19383E':'#E7F8FC'
-                    Label {anchors.left:parent.left;anchors.leftMargin:12;anchors.verticalCenter:parent.verticalCenter;anchors.right:parent.right;anchors.rightMargin:12;elide:Text.ElideRight;text:'⚑  '+I18n.p('My task','Eigen to-do')+' · '+notes.taskTitle;color:Theme.text;font.pixelSize:12*Theme.textScale}
-                }
-                RowLayout {Layout.fillWidth:true;spacing:16;Layout.alignment:Qt.AlignTop
-                    ColumnLayout {Layout.fillWidth:true;Layout.alignment:Qt.AlignTop;spacing:10
-                        ColumnLayout {visible:!Theme.fancy&&app.production&&!(app.taskInfo.sections||[]).some(section=>!!section.body.trim());Layout.fillWidth:true;Layout.topMargin:36;Layout.bottomMargin:36;spacing:10
-                            Icon {name:'todo';ink:Theme.teal;Layout.alignment:Qt.AlignHCenter;Layout.preferredWidth:48;Layout.preferredHeight:48}
-                            Label {text:I18n.t('Er is geen inhoud bij deze opdracht.');color:Theme.secondary;Layout.fillWidth:true;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;font.pixelSize:12*Theme.textScale}
-                        }
-                        Label {visible:Theme.fancy;text:notes.taskTitle;textFormat:Text.PlainText;color:Theme.text;Layout.fillWidth:true;wrapMode:Text.Wrap;font.pixelSize:22*Theme.textScale;font.bold:true}
-                        Repeater {model:app.production?(app.taskInfo.sections||[]):[{title:I18n.t('Instructions'),body:'Synthetic study material.'}]
-                            DetailCard {required property var modelData;objectName:'instructionCard';title:modelData.title;Layout.fillWidth:true
-                                Label {objectName:'instructionBody';textFormat:Text.PlainText;text:modelData.body.replace(/\n\s*\n(?=• )/g,'\n');visible:text!=='';Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:(Theme.fancy?14:12)*Theme.textScale;lineHeight:1.15}
-                            }
-                        }
-                        DetailCard {title:I18n.t('Bestanden en koppelingen');Layout.fillWidth:true;visible:app.production&&(app.taskInfo.links||[]).length>0
-                            Repeater {model:app.production?(app.taskInfo.links||[]):[]
-                                RowLayout {required property var modelData;required property int index;Layout.fillWidth:true
-                                    Icon {name:'file';ink:Theme.red;Layout.preferredWidth:18;Layout.preferredHeight:18}
-                                    Capsule {text:modelData.name||modelData.url||I18n.t('Bijlage');Layout.fillWidth:true;enabled:!!modelData.url&&!backend.features.featureBusy;onClicked:if(modelData.downloadable)backend.features.viewPlanner(notes.taskId,index);else backend.openExternal(modelData.url)}
-                                    Capsule {text:I18n.t('Offline');symbol:'file';visible:!!modelData.downloadable;enabled:app.production&&!backend.features.featureBusy;onClicked:backend.features.downloadPlanner(notes.taskId,index)}
-                                }
-                            }
-                        }
-                        DetailCard {title:I18n.t('Persoonlijke notitie');Layout.fillWidth:true
-                            TextArea {id:noteText;objectName:'noteText';Layout.fillWidth:true;Layout.preferredHeight:Theme.fancy?150:100;wrapMode:TextEdit.Wrap;selectByMouse:true;Accessible.name:I18n.t('Task note');placeholderText:I18n.t('Voeg een notitie toe…');color:Theme.text;font.pixelSize:12*Theme.textScale
-                                background:Rectangle {radius:3;color:Theme.elevated;border.width:noteText.activeFocus?2:1;border.color:noteText.activeFocus?Theme.blue:Theme.separator}}
-                            Capsule {visible:!Theme.fancy;text:I18n.t('Bewaren en sluiten');primary:true;onClicked:notes.dismiss()}
-                            Label {id:noteError;Layout.fillWidth:true;wrapMode:Text.Wrap;text:noteText.length+' / 5,000 · '+I18n.p('only on this device','alleen op dit apparaat');color:noteText.length>5000?Theme.red:Theme.secondary;font.pixelSize:10*Theme.textScale}
-                        }
-                    }
-                    ColumnLayout {Layout.preferredWidth:Theme.fancy?220:Math.min(280,notes.width*.20);Layout.maximumWidth:Theme.fancy?notes.width*.36:280;Layout.alignment:Qt.AlignTop;spacing:12
-                        DetailCard {title:I18n.t('Opdrachtgegevens');Layout.fillWidth:true
-                            Repeater {model:app.production?(app.taskInfo.facts||[]):[]
-                                RowLayout {required property var modelData;Layout.fillWidth:true;spacing:7
-                                    Icon {name:parent.modelData.label==='Due'?'clock':parent.modelData.label==='Course'?'cal':'school';ink:Theme.secondary;Layout.preferredWidth:14;Layout.preferredHeight:14;Layout.alignment:Qt.AlignTop}
-                                    ColumnLayout {Layout.fillWidth:true;spacing:2
-                                        Label {text:I18n.t(Theme.fancy?parent.parent.modelData.label:({'Due':'Deadline','Posted':'Gepubliceerd','Course':'Vak','Type':'Type','Teacher':'Leerkracht','Classroom':'Lokaal'})[parent.parent.modelData.label]||parent.parent.modelData.label);color:Theme.secondary;font.pixelSize:10*Theme.textScale}
-                                        Label {text:parent.parent.modelData.value;textFormat:Text.PlainText;color:Theme.text;font.pixelSize:11*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                                    }
-                                }
-                            }
-                        }
-                        DetailCard {title:I18n.t('Afwerken');Layout.fillWidth:true
-                            RowLayout {Layout.fillWidth:true
-                                TaskCheck {markSize:18;checked:tasks.completedIds.indexOf(notes.taskId)>=0;Accessible.name:I18n.t('Opdracht voltooien');onClicked:if(tasks.change(notes.taskId,'done',checked))app.notify(checked?'Taak voltooid':'Taak hersteld');else checked=Qt.binding(function(){return tasks.completedIds.indexOf(notes.taskId)>=0})}
-                                Label {text:I18n.t('Opdracht voltooid');color:Theme.text;font.pixelSize:11*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                            }
-                            Capsule {text:I18n.t('Focus');symbol:'focus';onClicked:if(notes.beforeClose()){focusView.taskId=notes.taskId;focusView.taskTitle=notes.taskTitle;notes.close();app.focusOpen=true}}
-                        }
-                        Label {visible:!!app.taskInfo.status;text:I18n.t(app.taskInfo.status||'');color:Theme.orange;Layout.fillWidth:true;wrapMode:Text.Wrap;font.pixelSize:11*Theme.textScale}
-                        Capsule {text:I18n.t('Bronbericht openen');visible:app.production&&!!app.taskInfo.messageId;enabled:app.production&&!backend.features.featureBusy;Layout.fillWidth:true;onClicked:if(notes.beforeClose()){notes.close();app.pickSection(6);messagesPage.readMessage(app.taskInfo.messageId)}}
-                    }
-                }
-            }
-        }
-    }
-
-    Popup {id:taskDayPopup;objectName:'taskDayContext';parent:Overlay.overlay;visible:notes.visible&&!Theme.fancy&&app.width>1150;modal:false;focus:false;closePolicy:Popup.NoAutoClose;popupType:Popup.Item;padding:0
-        width:390; height:notes.height;x:notes.x-width-18;y:notes.y;z:notes.z+1
-        background:Rectangle {color:Theme.elevated;border.color:Theme.separator;radius:5}
-        contentItem:ColumnLayout {spacing:0
-            Label {text:I18n.t('Mijn planner');color:Theme.secondary;font.pixelSize:22*Theme.textScale;padding:18;Layout.fillWidth:true}
-            Label {text:I18n.t(notes.dayContext.heading||'');textFormat:Text.PlainText;color:Theme.text;font.pixelSize:12*Theme.textScale;Layout.fillWidth:true;horizontalAlignment:Text.AlignHCenter;bottomPadding:16}
-            ScrollView {id:taskDayScroll;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;contentWidth:availableWidth
-                ColumnLayout {width:taskDayScroll.availableWidth;spacing:6
-                    Repeater {model:notes.dayContext.items
-                        RowLayout {required property var modelData;Layout.fillWidth:true;spacing:5
-                            Label {text:parent.modelData.meta.split(' · ')[0].split(' – ')[0];color:Theme.secondary;font.pixelSize:10;Layout.preferredWidth:40;Layout.alignment:Qt.AlignTop;topPadding:8}
-                            Rectangle {Layout.fillWidth:true;implicitHeight:Math.max(78,dayLessonText.implicitHeight+16);radius:4;color:Theme.lesson
-                                ColumnLayout {id:dayLessonText;anchors.fill:parent;anchors.margins:8;spacing:3
-                                    Label {text:parent.parent.parent.modelData.title;textFormat:Text.PlainText;color:Theme.text;font.bold:true;font.pixelSize:12*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                                    Label {text:parent.parent.parent.modelData.meta;textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize:10*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
-                                    Label {text:parent.parent.parent.modelData.extra||'';textFormat:Text.PlainText;color:Theme.text;font.pixelSize:11*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap;maximumLineCount:3;elide:Text.ElideRight}
-                                    TapHandler {onTapped:app.openSection(parent.parent.parent.modelData)}
-                                }
-                            }
-                        }
-                    }
-                    Item {implicitHeight:12}
-                }
-            }
-        }
-    }
-    Sheet {id:details
-        readonly property bool lessonDetails:app.sectionInfo.kind==='lesson'
-        readonly property var links:app.sectionInfo.links||[]
-        readonly property var contentLinks:lessonDetails?links.filter(link=>!link.lessonPage):links
-        readonly property var lessonPage:lessonDetails?links.find(link=>link.lessonPage):null
-        width:Math.min((lessonDetails?(Theme.fancy?800:940):560)*Theme.textScale,parent.width-24)
-        height:Math.min(implicitHeight+(lessonDetails?64*Theme.textScale:0),parent.height*.86)
-        headerColor:lessonDetails&&!Theme.fancy?Theme.lesson:Theme.elevated
-        footer:lessonDetails?lessonFooter:null
-        Component {id:lessonFooter
-            Pane {padding:Theme.fancy?16:10;background:Rectangle {color:Theme.fancy?"transparent":Theme.elevated;Rectangle {width:parent.width;height:1;color:Theme.separator;visible:!Theme.fancy}}
-                contentItem:RowLayout {Item {Layout.fillWidth:true}
-                    Capsule {visible:!!details.lessonPage;text:details.lessonPage?details.lessonPage.name:'';symbol:'ext';onClicked:backend.openExternal(details.lessonPage.url)}
-                    Capsule {primary:true;text:I18n.t('Close');onClicked:details.dismiss()}
-                }
-            }
-        }
-        GridLayout {Layout.fillWidth:true;columns:details.lessonDetails&&details.width>=680*Theme.textScale?2:1;columnSpacing:18;rowSpacing:12
-            ColumnLayout {Layout.fillWidth:true;Layout.preferredWidth:details.lessonDetails?details.width*.6:-1;Layout.minimumWidth:0;Layout.alignment:Qt.AlignTop;spacing:12
-                ColumnLayout {objectName:'emptyLessonContent';visible:details.lessonDetails&&!detailsText.text.trim()&&!details.contentLinks.length&&!(app.sectionInfo.assignments||[]).length
-                    Layout.fillWidth:true;Layout.preferredHeight:(parent.parent.columns===2?230:108)*Theme.textScale;spacing:8
-                    Item {Layout.fillHeight:true}
-                    Icon {name:'file';ink:Theme.teal;Layout.alignment:Qt.AlignHCenter;implicitWidth:36*Theme.textScale;implicitHeight:implicitWidth}
-                    Label {text:I18n.p('There is no content for this lesson.','Er is geen inhoud bij deze les.');Layout.fillWidth:true;wrapMode:Text.Wrap;horizontalAlignment:Text.AlignHCenter;color:Theme.secondary}
-                    Item {Layout.fillHeight:true}
-                }
-                Label {textFormat:Text.PlainText;id:detailsText;visible:text.length>0;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text;font.pixelSize:16*Theme.textScale}
-                Capsule {visible:app.production&&app.detailToken.startsWith('notes:');text:I18n.t('Reload note');onClicked:{detailsText.text=I18n.t('Loading note…');backend.openNote(app.detailToken.slice(6))}}
-                Capsule {visible:app.production&&backend.school!==''&&app.sectionInfo.kind!=='lesson';text:I18n.t('Open Smartschool');onClicked:backend.openExternal('https://'+backend.school.replace(/^https?:\/\//,''))}
-                Repeater {model:app.production?details.contentLinks:[];Capsule {required property var modelData;Layout.fillWidth:true;text:modelData.name||I18n.t('Open link');enabled:!!modelData.url&&!backend.features.featureBusy;onClicked:if(modelData.downloadable)backend.features.viewLinkedFile(modelData.url);else backend.openExternal(modelData.url)}}
-                Repeater {model:app.production?(app.sectionInfo.assignments||[]):[]
-                    ColumnLayout {id:assignmentDetail;required property var modelData;Layout.fillWidth:true
-                        LessonAssignment {app:details.hostWindow;modelData:assignmentDetail.modelData;onOpened:details.close()}
-                        Label {text:assignmentDetail.modelData.body||'';visible:text.length>0;textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text}
-                        Repeater {model:assignmentDetail.modelData.links||[]
-                            Capsule {required property var modelData;Layout.fillWidth:true;text:modelData.name||I18n.t('Open link');enabled:!!modelData.url&&!backend.features.featureBusy;onClicked:if(modelData.downloadable)backend.features.viewLinkedFile(modelData.url);else backend.openExternal(modelData.url)}
-                        }
-                    }
-                }
-            }
-            Pane {visible:details.lessonDetails;Layout.fillWidth:true;Layout.minimumWidth:0;Layout.preferredWidth:parent.columns===2?details.width*.34:0;Layout.alignment:Qt.AlignTop;padding:16
-                background:Surface {radius:Theme.fancy?18:6;backdrop:null;border.color:Theme.fancy?Theme.rim:Theme.separator}
-                contentItem:ColumnLayout {spacing:9
-                    Label {text:app.sectionInfo.title||'';visible:text.length>0;Layout.fillWidth:true;wrapMode:Text.Wrap;textFormat:Text.PlainText;color:Theme.text;font.bold:true}
-                    Label {text:app.sectionInfo.schedule||'';Layout.fillWidth:true;wrapMode:Text.Wrap;textFormat:Text.PlainText;color:Theme.secondary;lineHeight:1.25}
-                }
-            }
-        }
     }
     Surface {id:toast;objectName:'toast';anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;anchors.bottomMargin:110*Theme.textScale;width:toastRow.implicitWidth+24;height:52;radius:Theme.fancy?26:3;visible:opacity>0;opacity:presence;strong:true;z:3
         property string displayedText:''
@@ -545,7 +643,7 @@ ApplicationWindow {
         Connections {target:app;function onToastTextChanged(){if(app.toastText!=='')toast.displayedText=app.toastText}}
         RowLayout {id:toastRow;anchors.centerIn:parent
             Label {textFormat:Text.PlainText;text:toast.displayedText;color:Theme.text}
-            Capsule {text:I18n.t('Undo');quiet:true;visible:app.toastUndo;enabled:app.toastText!=='';onClicked:{planner.editMotion=true;tasks.undo();app.toastText=''}}
+            Capsule {text:I18n.t('Undo');quiet:true;visible:app.toastUndo;enabled:app.toastText!=='';onClicked:{if(planner)planner.editMotion=true;tasks.undo();app.toastText=''}}
         }
     }
     Timer{id:toastTimer;interval:3500;onTriggered:app.toastText=''}
@@ -570,8 +668,8 @@ ApplicationWindow {
         Capsule {text:I18n.t('Dismiss');onClicked:warningsSheet.close()}
     }
     Sheet {id:errorSheet;objectName:'errorSheet';title:I18n.t('Could not complete the action');Label {textFormat:Text.PlainText;text:I18n.t(app.errorText);Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.text} Capsule {text:I18n.t('Retry sync');enabled:!app.busy;onClicked:{errorSheet.close();app.syncNow()}} Capsule {text:I18n.t('Change login details');onClicked:app.changeAccount()}}
-    Shortcut{sequence:'Ctrl+F';enabled:app.section<7&&!app.focusPresented&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible&&!aiRequired.visible&&!reports.visible&&!offlineFiles.visible&&!replacements.visible&&!taskCollection.visible&&!filePreview.visible&&!messagesPage.readerVisible&&!messagesPage.composerVisible;onActivated:{if(app.section<6)app.searchOpen=true;app.searchFocus()}}
-    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes.visible&&!settings.visible&&!details.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:app.focusOpen=false}
+    Shortcut{sequence:'Ctrl+F';enabled:app.section<7&&!app.focusPresented&&!app.busy&&!notes?.visible&&!settings?.visible&&!details?.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible&&!aiRequired.visible&&!reports?.visible&&!offlineFiles?.visible&&!replacements.visible&&!taskCollection.visible&&!filePreview?.visible&&(!messagesPage||!messagesPage.readerVisible&&!messagesPage.composerVisible);onActivated:{if(app.section<6)app.searchOpen=true;app.searchFocus()}}
+    Shortcut{sequence:'Escape';enabled:app.focusOpen&&!app.busy&&!notes?.visible&&!settings?.visible&&!details?.visible&&!errorSheet.visible&&!noticeSheet.visible&&!warningsSheet.visible;onActivated:app.focusOpen=false}
     Repeater{model:[Qt.TopEdge,Qt.BottomEdge,Qt.LeftEdge,Qt.RightEdge,Qt.TopEdge|Qt.LeftEdge,Qt.TopEdge|Qt.RightEdge,Qt.BottomEdge|Qt.LeftEdge,Qt.BottomEdge|Qt.RightEdge]
         MouseArea{required property int modelData;visible:app.visibility!==Window.Maximized;z:20
             width:(modelData&Qt.LeftEdge)||(modelData&Qt.RightEdge)?6:app.width-12
@@ -586,17 +684,17 @@ ApplicationWindow {
     FrameAnimation { running: benchmarkEnabled && app.renderActive && (app.phase === "scroll" || app.phase === "transition")
         onTriggered: app.frameSamples.push(frameTime * 1000) }
     NumberAnimation on scrollProgress { id: scrollAnimation; running: false; from: 0; to: 1; duration: 4000 }
-    onScrollProgressChanged: planner.benchmarkScroll(scrollProgress)
+    onScrollProgressChanged: planner?.benchmarkScroll(scrollProgress)
     Timer { id: transitionTimer; interval: 180; repeat: true
         onTriggered: { app.section = (++app.transitionStep) % 6; if (app.transitionStep >= 20) { stop(); app.section = 0 } } }
     function bench(action) {
         if (action === "scroll") { phase = "scroll"; frameSamples = []; scrollAnimation.start() }
         if (action === "transition") { phase = "transition"; frameSamples = []; transitionStep = 0; transitionTimer.start() }
         if (action === "idle") { phase = "idle" }
-        if (action === "search") { planner.benchmarkSearch("quadratic") }
-        if (action === "clearSearch") { planner.benchmarkSearch("") }
-        if (action === "settings") settings.open()
-        if (action === "closeSettings") settings.close()
+        if (action === "search") { planner?.benchmarkSearch("quadratic") }
+        if (action === "clearSearch") { planner?.benchmarkSearch("") }
+        if (action === "settings") openSettings()
+        if (action === "closeSettings") settings?.close()
         if (action === "focus") { focusOpen = true }
     }
 }

@@ -1,6 +1,6 @@
 # Windows setup
 
-Use Python 3.12 and open PowerShell in this folder:
+Use 64-bit Python 3.14 and open PowerShell in this folder:
 
 ```powershell
 python -m venv .venv

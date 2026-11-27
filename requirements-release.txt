@@ -1,4 +1,4 @@
-# Locked Windows Python 3.12 runtime and build dependencies.
+# Locked Windows x64 Python 3.14 runtime and build dependencies.
 altgraph==0.17.5
 annotated-types==0.8.0
 anyio==4.15.1

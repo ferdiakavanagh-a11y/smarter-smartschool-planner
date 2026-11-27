@@ -561,6 +561,10 @@ class Backend(QObject):
         def fetch():
             import sync
             credentials = credential_store.smartschool_credentials(self.root/'credentials.yml')
+            if self._closed or self.data is not snapshot:
+                return {'_snapshot': snapshot}
+            if self.account() != account:
+                raise ValueError('Login details changed before opening the note.')
             with sync.TimeoutSmartschool(credentials) as session:
                 detail = sync.fetch_lvs_note_detail(session, note_id)
             detail['_snapshot'] = snapshot

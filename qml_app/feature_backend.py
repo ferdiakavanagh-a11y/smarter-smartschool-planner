@@ -7,8 +7,6 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl, QStandardPaths
 from PySide6.QtGui import QDesktopServices
 import credential_store
-from smartschool import AppCredentials
-from secure_session import SecureSmartschool
 from . import feature_state, school_services, school_ai
 from .message_composer import MessageComposer
 
@@ -97,6 +95,10 @@ class SchoolFeatures(QObject):
     def downloadedFiles(self):
         return [dict(key=r['key'], name=r['name'], source=r.get('source', ''), sourceId=r.get('sourceId', '')) for r in self._cache.get('downloads', [])]
     @Property(bool, notify=changed)
+    def messageListLoading(self):
+        return 'feature:messages' in self.backend._jobs
+
+    @Property(bool, notify=changed)
     def featureBusy(self): return any(n.startswith('feature:') for n in self.backend._jobs)
     @Property(bool, notify=changed)
     def aiAvailable(self):
@@ -173,6 +175,13 @@ class SchoolFeatures(QObject):
             return False
 
     def _session(self, credentials, action):
+        generation = self._generation
+        from smartschool import AppCredentials
+        from secure_session import SecureSmartschool
+
+        account = credential_store.account_key(credentials)
+        if generation != self._generation or account != self.backend.account():
+            raise _RequestExpired()
         login = AppCredentials(username=credentials.get('username', ''), password=credentials.get('password', ''),
                                main_url=credentials.get('main_url', ''), mfa=credentials.get('mfa') or 'REPLACE_ME')
         session = SecureSmartschool(login, self.backend.root)
@@ -313,22 +322,36 @@ class SchoolFeatures(QObject):
     def loadResources(self): self._start('resources', lambda c, a: self._session(c, school_services.fetch_resources))
     @Slot(str, result=bool)
     def openMessage(self, message_id):
-        listed=any(m.get('id') == message_id for m in self.messages)
-        if not (listed or
-                any(t.get('message_id') == message_id for t in self._cache.get('tasks', []))): return False
-        if self.featureBusy: return False
-        self._reply = ''
-        cached=self._cache.get('details', {}).get(message_id,{})
-        folder=self._message_folder if listed else cached.get('folder','inbox')
-        self._detail=cached if cached.get('folder','inbox')==folder else {}
-        if folder=='local':return False
-        self._message_loading, self._message_error = True, ''
-        self.changed.emit()
-        started = self._start('message', lambda c, a: self._session(c, lambda s: school_services.fetch_message(s, message_id,folder=folder)))
-        if not started:
-            self._message_loading = False
+        try:
+            self.backend.verify_account()
+            listed = any(m.get('id') == message_id for m in self.messages)
+            if not listed and not any(t.get('message_id') == message_id for t in self._cache.get('tasks', [])):
+                return False
+            cached = self._cache.get('details', {}).get(message_id, {})
+            folder = self._message_folder if listed else cached.get('folder', 'inbox')
+            if folder == 'local':
+                return False
+            waiting = self.featureBusy
+            self._reply = ''
+            self._detail, self._message_loading, self._message_error = {}, True, ''
+            started = not waiting and self._start(
+                'message', lambda c, a: self._session(
+                    c, lambda session: school_services.fetch_message(session, message_id, folder=folder)))
+            if not waiting and (not started or not self._message_loading):
+                # Verify again before using the cache if the job was rejected or already finished.
+                self.backend.verify_account()
+        except (OSError, ValueError):
+            self._reply = ''
+            self._detail, self._message_loading, self._message_error = {}, False, ''
             self.changed.emit()
-        return bool(started)
+            return False
+        if not self._detail and cached.get('folder', 'inbox') == folder:
+            self._detail = cached
+        if not waiting and not started:
+            self._message_loading = False
+        self.changed.emit()
+        return bool(waiting or started or self._detail)
+
     @Slot(str,result=bool)
     def trashMessage(self,message_id):
         folder=self._message_folder

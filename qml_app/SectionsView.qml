@@ -5,6 +5,9 @@ import "ResultPalette.js" as ResultPalette
 ListView {
     id:view;objectName:'sectionList'
     required property var app
+    property int section:app.section
+    property string query:''
+    property int revision:0
     property var readNotes: ({})
     property bool topResetPending:false
     opacity:topResetPending?0:1
@@ -14,12 +17,12 @@ ListView {
     readonly property var previewItem:Object.keys(preview).length?preview:(model&&model.length&&model[0].items.length?model[0].items[0]:({}))
     readonly property bool courseMenuVisible:headerItem?headerItem.courseMenuVisible:false
     function resetTop(){
-        if(!visible||app.section<2||height<=0)return
+        if(!visible||view.section<2||height<=0)return
         scrollMotion.stop();cancelFlick()
         if(headerItem)headerItem.forceLayout()
         forceLayout();app.headerCollapsed=false
         let target=-1
-        if(app.production&&(app.section===2||app.section===3)&&!app.searchText.trim()){
+        if(app.production&&(view.section===2||view.section===3)&&!query.trim()){
             let today=Qt.formatDate(new Date(),'yyyy-MM-dd'),lastDay=-1
             for(let i=0;i<model.length;i++)if(model[i].date&&(i===0||model[i].date!==model[i-1].date)){
                 lastDay=i
@@ -31,7 +34,7 @@ ListView {
         else positionViewAtBeginning()
     }
     function requestTop(){topResetPending=true;app.headerCollapsed=false;scrollMotion.stop();cancelFlick()}
-    onVisibleChanged:if(visible&&app.section>=2)requestTop()
+    onVisibleChanged:if(visible&&view.section>=2){query=app.searchText;requestTop()}
     function flatten(groups){
         let rows=[]
         for(let group of groups)for(let i=0;i<group.items.length;i++)
@@ -40,29 +43,29 @@ ListView {
     }
     signal detail(string title,string body)
     Layout.leftMargin:-16;Layout.rightMargin:-16
-    clip:false;spacing:0;topMargin:0;bottomMargin:Math.max((Theme.fancy?120:24)*Theme.textScale,(app.section===2||app.section===3)&&!app.searchText.trim()?height/2:0);reuseItems:true;cacheBuffer:180
+    clip:false;spacing:0;topMargin:0;bottomMargin:Math.max((Theme.fancy?120:24)*Theme.textScale,(view.section===2||view.section===3)&&!query.trim()?height/2:0);reuseItems:true;cacheBuffer:180
     boundsBehavior:Flickable.StopAtBounds
     displayMarginBeginning:220*Theme.textScale
     model: {
-        let revision=app.fixtureRevision
-        if(app.production){let groups=backend.groups(app.section,app.searchText,app.section===4?gradeCourse:'All subjects');if(app.section===5&&lvsKind!=='all')groups=groups.map(group=>Object.assign({},group,{items:group.items.filter(item=>item.kind===lvsKind)})).filter(group=>group.items.length);return flatten(groups)}
+        let dataRevision=view.revision
+        if(app.production){let groups=backend.groups(view.section,query,view.section===4?gradeCourse:'All subjects');if(view.section===5&&lvsKind!=='all')groups=groups.map(group=>Object.assign({},group,{items:group.items.filter(item=>item.kind===lvsKind)})).filter(group=>group.items.length);return flatten(groups)}
         if(app.datasetIndex===0)return []
         let rows=[]
         let courses=['Mathematics','Nederlands','Sciences','History','Français','日本語 & cultuur']
-        if(app.section===2||app.section===3){
+        if(view.section===2||view.section===3){
             for(let i=0;i<18;i++)rows.push({id:'lesson-'+i,heading:i%6===0?['Monday, 26 October','Tuesday, 27 October','Wednesday, 28 October'][Math.floor(i/6)]:'',title:courses[i%6],meta:(8+Math.floor(i%6))+':30 – '+(9+Math.floor(i%6))+':20 · Room '+(101+i%6)+' · Demo teacher',body:'Lesson overview\n\nSynthetic study material for '+courses[i%6]+'.\n\nAssignment: prepare one question for our next lesson.',extra:i%3===0?'Assignment · prepare one question':''})
-        }else if(app.section===4){
+        }else if(view.section===4){
             rows.push({id:'average',heading:'Overall average',title:'80%',meta:'Weighted by available points · synthetic results',body:'128 / 160 counting points. This demonstration includes counting and noncounting results.',extra:'Saved example · refresh unavailable'})
             for(let i=0;i<12;i++)rows.push({id:'grade-'+i,heading:i%2===0?courses[Math.floor(i/2)]:'',title:i%2===0?'Chapter review':'Class participation',meta:'23 Oct · '+(i%3===0?'Doesn’t count':'Counts toward total'),body:'Course: '+courses[Math.floor(i/2)]+'\n\nFeedback: explain your reasoning and check the final step.\n\nSynthetic result; no account connected.',extra:[ '8 / 10','14 / 20','18 / 20'][i%3]})
-        }else if(app.section===5){
+        }else if(view.section===5){
             for(let i=0;i<8;i++)rows.push({id:'lvs-'+i,heading:i===0?I18n.t('Notes'):i===5?I18n.t('Absences'):'',title:i<5?['Study progress','A note about participation','Project feedback','Planning support','Next steps'][i-0]:'Absence · authorised',meta:'23 Oct · '+(i<5?'Demo tutor':'Morning · A'),body:i<5?'Public synthetic note\n\nKeep using your planner to break larger assignments into small steps.\n\nZoë · 日本語 · نور':'Synthetic authorised absence. No personal school record.',extra:'',unread:!readNotes['lvs-'+i]})
         }
-        let q=app.searchText.toLocaleLowerCase()
+        let q=query.toLocaleLowerCase()
         let groups=[],heading='',lastHeading=''
         for(let row of rows){
             if(row.heading)heading=row.heading
             if(q&&!(row.title+' '+row.meta+' '+row.body).toLocaleLowerCase().includes(q))continue
-            if(app.section===4||!groups.length||heading!==lastHeading){
+            if(view.section===4||!groups.length||heading!==lastHeading){
                 groups.push({heading:heading!==lastHeading?heading:'',items:[]})
             }
             groups[groups.length-1].items.push(row)
@@ -73,17 +76,25 @@ ListView {
     ScrollBar.vertical:ScrollBar{id:scrollBar;parent:view.parent;visible:view.visible;x:view.x+view.width-width-16;y:view.y;height:view.height}
     SmoothScroll {id:scrollMotion; view:view }
     Connections {target:app
-        function onSectionChanged(){view.preview=({});if(app.section>=2)view.requestTop()}
-        function onSearchTextChanged(){if(view.visible)view.requestTop()}
-        function onFixtureRevisionChanged(){view.preview=({});view.readNotes={};if(app.production&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects';if(view.visible&&(app.section===2||app.section===3))view.requestTop()}
+        function onSearchTextChanged(){if(view.visible){view.query=app.searchText;view.requestTop()}}
         function onAfterAnimating(){if(view.topResetPending&&view.visible&&view.height>0){app.settleHeader();view.resetTop();view.topResetPending=false}}
     }
-    onContentYChanged:if(view.visible&&!topResetPending&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=app.section!==3&&contentY-originY>80&&!app.searchOpen
-    Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){view.positionViewAtIndex(view.currentIndex,ListView.Contain);Qt.callLater(function(){if(!view.topResetPending)app.headerCollapsed=app.section!==3&&view.contentY-view.originY>80&&!app.searchOpen})}}
+    Connections {target:app.production?backend:null
+        function onGroupsChanged(section){
+            if(section>=0&&section!==view.section)return
+            view.preview=({})
+            view.readNotes=({})
+            if(view.section===4&&backend.gradeCourses.indexOf(view.gradeCourse)<0)view.gradeCourse='All subjects'
+            view.revision++
+            if(view.visible&&(view.section===2||view.section===3))view.requestTop()
+        }
+    }
+    onContentYChanged:if(view.visible&&!topResetPending&&(atYBeginning||moving||scrollMotion.active||scrollMotion.glide.running||scrollBar.pressed))app.headerCollapsed=view.section!==3&&contentY-originY>80&&!app.searchOpen
+    Keys.onReleased:event=>{event.accepted=false;if([Qt.Key_Up,Qt.Key_Down,Qt.Key_PageUp,Qt.Key_PageDown,Qt.Key_Home,Qt.Key_End].indexOf(event.key)>=0){view.positionViewAtIndex(view.currentIndex,ListView.Contain);Qt.callLater(function(){if(!view.topResetPending)app.headerCollapsed=view.section!==3&&view.contentY-view.originY>80&&!app.searchOpen})}}
     header:Column {
         readonly property bool courseMenuVisible:gradePicker.popup.visible
         x:16;width:view.width-32;spacing:10
-        Item {id:gradeSlot;visible:app.section===4&&app.production;width:parent.width;height:visible?Math.max(48,gradeReports.height):0
+        Item {id:gradeSlot;visible:view.section===4&&app.production;width:parent.width;height:visible?Math.max(48,gradeReports.height):0
             GlassComboBox {id:gradePicker;objectName:'gradeCourseFilter';parent:app.controlsLayer
                 readonly property point origin:app.controlPosition(gradeSlot)
                 x:origin.x;y:origin.y;visible:gradeSlot.visible&&view.visible&&!app.focusOpen&&origin.y>=app.controlPosition(view).y-1
@@ -99,12 +110,12 @@ ListView {
                 text:I18n.t('Report cards');symbol:'file';onClicked:app.showReports()
             }
         }
-        Row {visible:app.section===5&&!Theme.fancy;spacing:4
+        Row {visible:view.section===5&&!Theme.fancy;spacing:4
             Repeater {model:[{name:I18n.t('All'),kind:'all'},{name:I18n.t('Notes'),kind:'notes'},{name:I18n.t('Absences'),kind:'absences'}];Capsule {required property var modelData;text:modelData.name;selected:view.lvsKind===modelData.kind;onClicked:{view.lvsKind=modelData.kind;view.preview=({});view.requestTop()}}}
         }
-        Label {textFormat:Text.PlainText;visible:app.section===5;text:app.production?I18n.t('This school year'):I18n.t('This school year · Synthetic workspace');color:Theme.secondary;padding:8}
-        Capsule {visible:app.section===4&&app.production&&backend.features.selectedPeriod!=='';text:app.production?I18n.t('Period: ')+backend.features.selectedPeriod+I18n.t(' · Clear'):'';onClicked:backend.features.selectPeriod('')}
-        Capsule {objectName:'markAllRead';visible:app.section===5;text:I18n.t('Mark all as read');onClicked:{if(app.production){backend.markRead('*');return}let next={};for(let i=0;i<8;i++)next['lvs-'+i]=true;view.readNotes=next}}
+        Label {textFormat:Text.PlainText;visible:view.section===5;text:app.production?I18n.t('This school year'):I18n.t('This school year · Synthetic workspace');color:Theme.secondary;padding:8}
+        Capsule {visible:view.section===4&&app.production&&backend.features.selectedPeriod!=='';text:app.production?I18n.t('Period: ')+backend.features.selectedPeriod+I18n.t(' · Clear'):'';onClicked:backend.features.selectPeriod('')}
+        Capsule {objectName:'markAllRead';visible:view.section===5;text:I18n.t('Mark all as read');onClicked:{if(app.production){backend.markRead('*');return}let next={};for(let i=0;i<8;i++)next['lvs-'+i]=true;view.readNotes=next}}
     }
     delegate:Column {
         id:entry;required property var modelData;width:view.width-32;spacing:0
@@ -123,9 +134,9 @@ ListView {
                 Repeater {model:entry.modelData.items
                     ItemDelegate {
                         id:card;objectName:'sectionRow';required property var modelData;required property int index
-                        property bool lesson:app.section===2||app.section===3
+                        property bool lesson:view.section===2||view.section===3
                         property bool summary:modelData.kind==='summary'
-                        property color scoreInk:app.section===4?ResultPalette.ink(modelData,Theme.dark):Theme.text
+                        property color scoreInk:view.section===4?ResultPalette.ink(modelData,Theme.dark):Theme.text
                         width:groupRows.width;height:Math.max(64*Theme.textScale,cardContent.implicitHeight+(Theme.fancy?28:20))
                         padding:14;leftPadding:16;rightPadding:16;hoverEnabled:true
                         Accessible.name:modelData.title+', '+modelData.meta+', '+modelData.extra+(modelData.unread?I18n.t(', unread'):'')+(modelData.square?', '+modelData.resultLabel:'')
@@ -151,7 +162,7 @@ ListView {
                                         }
                                         Label {textFormat:Text.PlainText;visible:!card.lesson&&!card.summary;text:card.modelData.meta;color:Theme.secondary;font.pixelSize:13*Theme.textScale;Layout.fillWidth:true;wrapMode:Text.Wrap}
                                     }
-                                    ColumnLayout {visible:app.section===4;Layout.maximumWidth:cardContent.width*(Theme.fancy?.4:.5);spacing:3
+                                    ColumnLayout {visible:view.section===4;Layout.maximumWidth:cardContent.width*(Theme.fancy?.4:.5);spacing:3
                                         Rectangle {id:resultSquare;objectName:'gradeSquare';visible:!!card.modelData.square;Layout.alignment:Qt.AlignRight;implicitWidth:28;implicitHeight:28;radius:8;color:card.modelData.square||'transparent'
                                             border.width:1;border.color:Theme.alpha(Theme.text,.12)
                                             GlassToolTip {requested:resultSquare.visible&&(card.hovered||card.visualFocus);text:card.modelData.resultLabel||''}
@@ -169,7 +180,7 @@ ListView {
                         }
                         Rectangle {objectName:'unreadDot';visible:!!card.modelData.unread;anchors.right:parent.right;anchors.top:parent.top;anchors.margins:13;width:8;height:8;radius:4;color:'#df342e'}
                         Rectangle {visible:!entry.modelData.first;x:card.lesson?100*Theme.textScale:20;y:0;width:parent.width-x-18;height:1;color:Theme.alpha(Theme.text,.12)}
-                        onClicked:{view.preview=modelData;if(!Theme.fancy&&app.section===4)return;if(app.production){app.openSection(modelData);return}let title=modelData.title,body=modelData.body,id=modelData.id,host=view;if(app.section===5){let next=Object.assign({},view.readNotes);next[id]=true;view.readNotes=next}host.detail(title,body)}
+                        onClicked:{view.preview=modelData;if(!Theme.fancy&&view.section===4)return;if(app.production){app.openSection(modelData);return}let title=modelData.title,body=modelData.body,id=modelData.id,host=view;if(view.section===5){let next=Object.assign({},view.readNotes);next[id]=true;view.readNotes=next}host.detail(title,body)}
                     }
                 }
             }
