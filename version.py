@@ -1,22 +1,22 @@
 """Shared application and installer release version."""
 
-__version__ = "3.2.0"
+__version__ = "3.2.1-beta.1"
 
-RELEASE_NOTES = """## New native desktop interface
-The planner now uses Qt Quick with liquid glass controls, smooth navigation,
-an animated sync screen and four original backgrounds. New installations start
-with Clear Light and Soft colours; existing appearance preferences are kept.
+RELEASE_NOTES = """## Faster startup and navigation
 
-## Planner improvements
-Browse tasks, missed work, schedules, classes, grades and LVS in one interface.
-Completed, pinning, notes and Undo preserve your reading position. Improved
-keyboard controls, text scaling, reduced motion and high contrast are available.
+- The app opens in your saved theme while it loads Tasks.
+- Saved Tasks can become usable while the Smartschool integration loads.
+- Loaded tabs respond faster, and notes, lesson details, reports and offline files open on demand.
 
-## Reliability and data safety
-Fixed account identification after Smartschool's homepage changes. Improved
-deadline handling, cache validation, durable saves and protected account storage.
+## Messages and account safety
 
-## Safer updates
-Automatic updates verify the release download and SHA-256 checksum. Installers
-are verified before installation.
+- Cached messages stay readable during inbox refresh.
+- The app checks account ownership before showing cached mail and cancels pending reads when the account changes.
+- Smartschool adapts its message reader to narrow windows and larger text. Both themes place Gemini next to Reply.
+
+## Windows installer
+
+- The Windows build now uses Python 3.14 and bundles precompiled UI files.
+
+This is a prerelease for testing startup, messaging and the Windows installer.
 """
